@@ -259,7 +259,7 @@ class YouTubeContentController {
         if (!chrome?.runtime?.sendMessage) throw new Error('No runtime');
         chrome.runtime.sendMessage({ type: 'PING_BACKGROUND' }, (response) => {
           if (chrome.runtime.lastError) {
-            if (chrome.runtime.lastError.message?.includes('invalidated') || chrome.runtime.lastError.message?.includes('does not exist')) {
+            if (chrome.runtime.lastError.message?.includes('invalidated')) {
               this.handleContextInvalidated();
             }
             resolve(false);
