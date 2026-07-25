@@ -87,7 +87,7 @@ const Panel = ({ videoId, onClose }: { videoId: string; onClose: () => void }) =
               background: 'none',
               border: 'none',
               borderBottom: activeTab === t.id ? '2px solid #ef4444' : '2px solid transparent',
-              color: !t.enabled ? '#d1d5db' : activeTab === t.id ? '#ef4444' : '#6b7280',
+              color: !t.enabled ? 'var(--zy-border, #d1d5db)' : activeTab === t.id ? '#ef4444' : 'var(--zy-text-muted, #6b7280)',
               cursor: t.enabled ? 'pointer' : 'not-allowed',
               whiteSpace: 'nowrap',
               transition: 'color 0.15s, border-color 0.15s',

@@ -148,7 +148,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
           <div>
             <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Motor</label>
             <select value={selectedEngine} onChange={e => setSelectedEngine(e.target.value as SummaryEngine)}
-              style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid #d1d5db', borderRadius: '4px' }}
+              style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', backgroundColor: 'var(--zy-card-bg, #fff)', color: 'var(--zy-text, #111827)' }}
             >
               <option value="gemini-gem">Gemini Gem</option>
               <option value="openai-compatible">API</option>
@@ -158,7 +158,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
           <div>
             <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Uzunluk</label>
             <select value={selectedLength} onChange={e => setSelectedLength(e.target.value as any)}
-              style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid #d1d5db', borderRadius: '4px' }}
+              style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', backgroundColor: 'var(--zy-card-bg, #fff)', color: 'var(--zy-text, #111827)' }}
             >
               <option value="short">Kısa</option>
               <option value="standard">Standart</option>
@@ -168,7 +168,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
           <div>
             <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Dil</label>
             <select value={selectedLanguage} onChange={e => setSelectedLanguage(e.target.value as any)}
-              style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid #d1d5db', borderRadius: '4px' }}
+              style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', backgroundColor: 'var(--zy-card-bg, #fff)', color: 'var(--zy-text, #111827)' }}
             >
               <option value="tr">Türkçe</option>
               <option value="en">English</option>
@@ -180,7 +180,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
         <p style={{ color: 'var(--zy-text-muted, #6b7280)', fontSize: '12px' }}>Bu video için henüz bir özet oluşturulmadı.</p>
         <button onClick={startSummary}
           style={{
-            padding: '8px 20px', backgroundColor: '#ef4444', color: 'var(--zy-card-bg, #fff)', border: 'none',
+            padding: '8px 20px', backgroundColor: '#ef4444', color: '#ffffff', border: 'none',
             borderRadius: '20px', fontWeight: 600, fontSize: '13px', cursor: 'pointer',
             transition: 'background 0.15s', alignSelf: 'flex-start',
           }}
@@ -196,7 +196,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
     return (
       <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
         <div style={{
-          width: '32px', height: '32px', border: '3px solid #fecaca', borderTop: '3px solid #ef4444',
+          width: '32px', height: '32px', border: '3px solid var(--zy-border, #fecaca)', borderTop: '3px solid #ef4444',
           borderRadius: '50%', animation: 'spin 1s linear infinite'
         }} />
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
@@ -207,7 +207,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
         <button onClick={cancelSummary}
           style={{
             padding: '5px 14px', fontSize: '12px', color: 'var(--zy-text-muted, #6b7280)', background: 'none',
-            border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer',
+            border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', cursor: 'pointer',
           }}
         >İptal Et</button>
       </div>
@@ -217,7 +217,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
   // ─── Hata ───
   if (error) {
     return (
-      <div style={{ padding: '12px', border: '1px solid #fecaca', backgroundColor: 'var(--zy-error-bg, #fef2f2)', borderRadius: '8px', fontSize: '13px', color: 'var(--zy-error-text, #dc2626)' }}>
+      <div style={{ padding: '12px', border: '1px solid var(--zy-error-border, #fecaca)', backgroundColor: 'var(--zy-error-bg, #fef2f2)', borderRadius: '8px', fontSize: '13px', color: 'var(--zy-error-text, #dc2626)' }}>
         <p style={{ fontWeight: 700, marginBottom: '6px' }}>Özetleme Başarısız</p>
         <p>{error}</p>
         <button onClick={startSummary}
@@ -253,7 +253,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
         </div>
 
         {/* Özet */}
-        <div style={{ backgroundColor: 'var(--zy-card-inner, rgba(0,0,0,0.03))', padding: '12px', borderRadius: '8px', border: '1px solid rgba(0,0,0,0.06)' }}>
+        <div style={{ backgroundColor: 'var(--zy-card-inner, rgba(0,0,0,0.03))', padding: '12px', borderRadius: '8px', border: '1px solid var(--zy-border, rgba(0,0,0,0.06))' }}>
           <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>Özet</h3>
           {(isDual || hasTr) && <p style={{ lineHeight: '1.6', color: 'var(--zy-text, #374151)' }}>{result.summary.tr || result.summary.en}</p>}
           {isDual && <hr style={{ border: 'none', borderTop: '1px solid rgba(0,0,0,0.06)', margin: '8px 0' }} />}
@@ -266,7 +266,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
             <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>💡 Ana Fikirler</h3>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {result.keyIdeas.map((ki, idx) => (
-                <li key={idx} style={{ padding: '8px', backgroundColor: 'var(--zy-card-bg, #fff)', border: '1px solid #e5e7eb', borderRadius: '6px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                <li key={idx} style={{ padding: '8px', backgroundColor: 'var(--zy-card-bg, #fff)', border: '1px solid var(--zy-border, #e5e7eb)', borderRadius: '6px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
                   {ki.startTimeMs != null && (
                     <button onClick={() => handleTimeClick(ki.startTimeMs)}
                       style={{ fontSize: '11px', backgroundColor: 'var(--zy-item-bg, #f3f4f6)', padding: '2px 6px', borderRadius: '3px', border: 'none', color: 'var(--zy-text-muted, #6b7280)', cursor: 'pointer', flexShrink: 0 }}
@@ -288,7 +288,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
         {result.sections?.length > 0 && (
           <div>
             <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>Bölümler</h3>
-            <div style={{ borderLeft: '2px solid #e5e7eb', paddingLeft: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ borderLeft: '2px solid var(--zy-border, #e5e7eb)', paddingLeft: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {result.sections.map((sec, idx) => (
                 <div key={idx}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -309,7 +309,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
         )}
 
         {/* Meta bilgi */}
-        <div style={{ fontSize: '11px', color: '#9ca3af', display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #e5e7eb', paddingTop: '8px' }}>
+        <div style={{ fontSize: '11px', color: 'var(--zy-text-muted, #9ca3af)', display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--zy-border, #e5e7eb)', paddingTop: '8px' }}>
           <span>Motor: {engineLabels[result.providerId as SummaryEngine] || result.providerId}</span>
           {result.usage && <span>Tokens: {result.usage.inputTokens} / {result.usage.outputTokens}</span>}
         </div>

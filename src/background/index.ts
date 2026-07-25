@@ -247,12 +247,9 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
             }
           }
 
-          const contentType = res.headers.get('content-type') || '';
-          const validTypes = ['application/json', 'text/json', 'text/xml', 'application/xml', 'text/plain'];
-          
-          if (!validTypes.some(t => contentType.includes(t)) && !isTestEnv) {
-             throw new Error('Invalid content type: ' + contentType);
-          }
+          // Content-type kontrolü kaldırıldı — YouTube altyazıları beklenmeyen 
+          // content-type'larla (text/html, application/octet-stream vs.) dönebiliyor.
+          // Güvenlik zaten host doğrulamasıyla sağlanıyor.
           return res.text();
         })
         .then(text => {

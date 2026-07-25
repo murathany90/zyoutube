@@ -212,7 +212,7 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
       });
     } catch (e: any) {
       const { TranscriptError } = await import('./types');
-      throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı dosyası indirilemedi.', {
+      throw new TranscriptError('CAPTION_FETCH_FAILED', `Altyazı dosyası indirilemedi: ${e.message}`, {
          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: e.message
       });
     }
