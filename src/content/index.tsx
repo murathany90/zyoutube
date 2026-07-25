@@ -279,7 +279,7 @@ class YouTubeContentController {
   private mountPanel(videoId: string): boolean {
     const secondary = document.querySelector('#secondary-inner') || document.querySelector('#secondary');
     if (!secondary) {
-      console.log('ZYouTube: mountPanel failed! Could not find #secondary-inner or #secondary in the DOM.');
+      console.warn('ZYouTube: mountPanel failed! Could not find #secondary-inner or #secondary in the DOM.');
       return false;
     }
 
@@ -369,8 +369,11 @@ class YouTubeContentController {
     `;
 
     btn.addEventListener('click', () => {
-      console.log('ZYouTube: Button clicked. isInvalidated:', this.isInvalidated, 'panelHidden:', this.panelHiddenForTab);
-      if (this.isInvalidated) return;
+      console.warn('ZYouTube: Button clicked. isInvalidated:', this.isInvalidated, 'panelHidden:', this.panelHiddenForTab);
+      if (this.isInvalidated) {
+        alert('ZYouTube: Eklenti güncellendiği için sayfanın yenilenmesi gerekiyor. Lütfen sayfayı yenileyin (F5).');
+        return;
+      }
       if (this.panelHiddenForTab) {
         this.panelHiddenForTab = false;
         const vid = this.getVideoId();
