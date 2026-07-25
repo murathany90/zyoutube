@@ -146,7 +146,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
       <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
           <div>
-            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: '#6b7280' }}>Motor</label>
+            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Motor</label>
             <select value={selectedEngine} onChange={e => setSelectedEngine(e.target.value as SummaryEngine)}
               style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid #d1d5db', borderRadius: '4px' }}
             >
@@ -156,7 +156,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
             </select>
           </div>
           <div>
-            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: '#6b7280' }}>Uzunluk</label>
+            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Uzunluk</label>
             <select value={selectedLength} onChange={e => setSelectedLength(e.target.value as any)}
               style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid #d1d5db', borderRadius: '4px' }}
             >
@@ -166,7 +166,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
             </select>
           </div>
           <div>
-            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: '#6b7280' }}>Dil</label>
+            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Dil</label>
             <select value={selectedLanguage} onChange={e => setSelectedLanguage(e.target.value as any)}
               style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid #d1d5db', borderRadius: '4px' }}
             >
@@ -177,10 +177,10 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
           </div>
         </div>
 
-        <p style={{ color: '#6b7280', fontSize: '12px' }}>Bu video için henüz bir özet oluşturulmadı.</p>
+        <p style={{ color: 'var(--zy-text-muted, #6b7280)', fontSize: '12px' }}>Bu video için henüz bir özet oluşturulmadı.</p>
         <button onClick={startSummary}
           style={{
-            padding: '8px 20px', backgroundColor: '#ef4444', color: '#fff', border: 'none',
+            padding: '8px 20px', backgroundColor: '#ef4444', color: 'var(--zy-card-bg, #fff)', border: 'none',
             borderRadius: '20px', fontWeight: 600, fontSize: '13px', cursor: 'pointer',
             transition: 'background 0.15s', alignSelf: 'flex-start',
           }}
@@ -202,11 +202,11 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         <div style={{ textAlign: 'center' }}>
           <p style={{ fontWeight: 700, fontSize: '14px', margin: '0 0 4px' }}>İşleniyor</p>
-          <p style={{ fontSize: '12px', color: '#6b7280' }}>{progressMessage}</p>
+          <p style={{ fontSize: '12px', color: 'var(--zy-text-muted, #6b7280)' }}>{progressMessage}</p>
         </div>
         <button onClick={cancelSummary}
           style={{
-            padding: '5px 14px', fontSize: '12px', color: '#6b7280', background: 'none',
+            padding: '5px 14px', fontSize: '12px', color: 'var(--zy-text-muted, #6b7280)', background: 'none',
             border: '1px solid #d1d5db', borderRadius: '4px', cursor: 'pointer',
           }}
         >İptal Et</button>
@@ -217,11 +217,11 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
   // ─── Hata ───
   if (error) {
     return (
-      <div style={{ padding: '12px', border: '1px solid #fecaca', backgroundColor: '#fef2f2', borderRadius: '8px', fontSize: '13px', color: '#dc2626' }}>
+      <div style={{ padding: '12px', border: '1px solid #fecaca', backgroundColor: 'var(--zy-error-bg, #fef2f2)', borderRadius: '8px', fontSize: '13px', color: 'var(--zy-error-text, #dc2626)' }}>
         <p style={{ fontWeight: 700, marginBottom: '6px' }}>Özetleme Başarısız</p>
         <p>{error}</p>
         <button onClick={startSummary}
-          style={{ marginTop: '10px', padding: '5px 12px', fontSize: '12px', backgroundColor: '#fee2e2', border: 'none', borderRadius: '4px', fontWeight: 600, cursor: 'pointer' }}
+          style={{ marginTop: '10px', padding: '5px 12px', fontSize: '12px', backgroundColor: 'var(--zy-error-bg, #fef2f2)', border: 'none', borderRadius: '4px', fontWeight: 600, cursor: 'pointer' }}
         >Tekrar Dene</button>
       </div>
     );
@@ -230,10 +230,10 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
   // ─── İptal ───
   if (status === 'cancelled') {
     return (
-      <div style={{ padding: '12px', fontSize: '13px', color: '#6b7280' }}>
+      <div style={{ padding: '12px', fontSize: '13px', color: 'var(--zy-text-muted, #6b7280)' }}>
         <p>İşlem kullanıcı tarafından iptal edildi.</p>
         <button onClick={startSummary}
-          style={{ marginTop: '8px', padding: '5px 12px', fontSize: '12px', backgroundColor: '#f3f4f6', border: 'none', borderRadius: '4px', fontWeight: 600, cursor: 'pointer' }}
+          style={{ marginTop: '8px', padding: '5px 12px', fontSize: '12px', backgroundColor: 'var(--zy-item-bg, #f3f4f6)', border: 'none', borderRadius: '4px', fontWeight: 600, cursor: 'pointer' }}
         >Tekrar Dene</button>
       </div>
     );
@@ -253,11 +253,11 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
         </div>
 
         {/* Özet */}
-        <div style={{ backgroundColor: 'rgba(0,0,0,0.03)', padding: '12px', borderRadius: '8px', border: '1px solid rgba(0,0,0,0.06)' }}>
+        <div style={{ backgroundColor: 'var(--zy-card-inner, rgba(0,0,0,0.03))', padding: '12px', borderRadius: '8px', border: '1px solid rgba(0,0,0,0.06)' }}>
           <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>Özet</h3>
-          {(isDual || hasTr) && <p style={{ lineHeight: '1.6', color: '#374151' }}>{result.summary.tr || result.summary.en}</p>}
+          {(isDual || hasTr) && <p style={{ lineHeight: '1.6', color: 'var(--zy-text, #374151)' }}>{result.summary.tr || result.summary.en}</p>}
           {isDual && <hr style={{ border: 'none', borderTop: '1px solid rgba(0,0,0,0.06)', margin: '8px 0' }} />}
-          {(isDual || !hasTr) && <p style={{ lineHeight: '1.6', color: '#374151' }}>{result.summary.en || result.summary.tr}</p>}
+          {(isDual || !hasTr) && <p style={{ lineHeight: '1.6', color: 'var(--zy-text, #374151)' }}>{result.summary.en || result.summary.tr}</p>}
         </div>
 
         {/* Ana Fikirler */}
@@ -266,15 +266,15 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
             <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>💡 Ana Fikirler</h3>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {result.keyIdeas.map((ki, idx) => (
-                <li key={idx} style={{ padding: '8px', backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '6px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                <li key={idx} style={{ padding: '8px', backgroundColor: 'var(--zy-card-bg, #fff)', border: '1px solid #e5e7eb', borderRadius: '6px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
                   {ki.startTimeMs != null && (
                     <button onClick={() => handleTimeClick(ki.startTimeMs)}
-                      style={{ fontSize: '11px', backgroundColor: '#f3f4f6', padding: '2px 6px', borderRadius: '3px', border: 'none', color: '#6b7280', cursor: 'pointer', flexShrink: 0 }}
+                      style={{ fontSize: '11px', backgroundColor: 'var(--zy-item-bg, #f3f4f6)', padding: '2px 6px', borderRadius: '3px', border: 'none', color: 'var(--zy-text-muted, #6b7280)', cursor: 'pointer', flexShrink: 0 }}
                     >{formatTime(ki.startTimeMs)}</button>
                   )}
                   <div>
                     <strong>{(isDual || hasTr) ? (ki.title?.tr || ki.title?.en) : (ki.title?.en || ki.title?.tr)}</strong>
-                    <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '12px' }}>
+                    <p style={{ margin: '4px 0 0', color: 'var(--zy-text-muted, #6b7280)', fontSize: '12px' }}>
                       {(isDual || hasTr) ? (ki.description?.tr || ki.description?.en) : (ki.description?.en || ki.description?.tr)}
                     </p>
                   </div>
@@ -295,11 +295,11 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
                     <strong>{(isDual || hasTr) ? (sec.title?.tr || sec.title?.en) : (sec.title?.en || sec.title?.tr)}</strong>
                     {sec.startTimeMs != null && (
                       <button onClick={() => handleTimeClick(sec.startTimeMs)}
-                        style={{ fontSize: '10px', color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer' }}
+                        style={{ fontSize: '10px', color: 'var(--zy-text-muted, #6b7280)', background: 'none', border: 'none', cursor: 'pointer' }}
                       >[{formatTime(sec.startTimeMs)}]</button>
                     )}
                   </div>
-                  <p style={{ margin: '4px 0 0', color: '#6b7280', fontSize: '12px' }}>
+                  <p style={{ margin: '4px 0 0', color: 'var(--zy-text-muted, #6b7280)', fontSize: '12px' }}>
                     {(isDual || hasTr) ? (sec.summary?.tr || sec.summary?.en) : (sec.summary?.en || sec.summary?.tr)}
                   </p>
                 </div>

@@ -16,11 +16,11 @@ const Toggle = ({ checked, onChange, label }: { checked: boolean; onChange: (v: 
     <div onClick={(e) => { e.preventDefault(); onChange(!checked); }}
       style={{
         width: '40px', height: '22px', borderRadius: '11px',
-        backgroundColor: checked ? '#ef4444' : '#d1d5db',
+        backgroundColor: checked ? '#ef4444' : 'var(--zy-border, #d1d5db)',
         position: 'relative', transition: 'background-color 0.2s', cursor: 'pointer', flexShrink: 0,
       }}>
       <div style={{
-        width: '18px', height: '18px', borderRadius: '9px', backgroundColor: '#fff',
+        width: '18px', height: '18px', borderRadius: '9px', backgroundColor: 'var(--zy-card-bg, #fff)',
         position: 'absolute', top: '2px', left: checked ? '20px' : '2px',
         transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
       }} />
@@ -139,7 +139,7 @@ const Popup = () => {
   const selectStyle: React.CSSProperties = { ...inputStyle };
 
   const sectionTitle: React.CSSProperties = {
-    fontSize: '12px', fontWeight: 700, color: '#6b7280', marginBottom: '8px', marginTop: '16px',
+    fontSize: '12px', fontWeight: 700, color: 'var(--zy-text-muted, #6b7280)', marginBottom: '8px', marginTop: '16px',
     textTransform: 'uppercase', letterSpacing: '0.5px',
   };
 
@@ -153,7 +153,7 @@ const Popup = () => {
       {/* Fixed Header */}
       <header style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '10px 16px', backgroundColor: '#fff',
+        padding: '10px 16px', backgroundColor: 'var(--zy-card-bg, #fff)',
         borderBottom: '1px solid #e5e7eb', flexShrink: 0,
       }}>
         <h1 style={{ fontSize: '15px', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -168,7 +168,7 @@ const Popup = () => {
       {/* Fixed Tabs */}
       <div style={{
         display: 'flex', borderBottom: '1px solid #e5e7eb',
-        backgroundColor: '#fff', flexShrink: 0,
+        backgroundColor: 'var(--zy-card-bg, #fff)', flexShrink: 0,
       }}>
         {tabItems.map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)}
@@ -176,7 +176,7 @@ const Popup = () => {
               flex: 1, padding: '9px 4px', fontSize: '12px', fontWeight: 600,
               background: 'none', border: 'none',
               borderBottom: activeTab === t.id ? '2px solid #ef4444' : '2px solid transparent',
-              color: activeTab === t.id ? '#ef4444' : '#6b7280',
+              color: activeTab === t.id ? '#ef4444' : 'var(--zy-text-muted, #6b7280)',
               cursor: 'pointer', transition: 'color 0.15s',
             }}
           >{t.label}</button>
@@ -192,14 +192,14 @@ const Popup = () => {
         {activeTab === 'general' && (
           <div>
             <div style={sectionTitle}>Panel Ayarları</div>
-            <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px' }}>
+            <div style={{ background: 'var(--zy-card-bg, #fff)', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px' }}>
               <Toggle label="YouTube paneli aktif" checked={panelSettings.enabled} onChange={v => savePanel({ ...panelSettings, enabled: v })} />
               <Toggle label="Watch sayfasında otomatik göster" checked={panelSettings.autoOpenOnWatchPage}
                 onChange={v => savePanel({ ...panelSettings, autoOpenOnWatchPage: v })} />
             </div>
 
             <div style={sectionTitle}>Özet Ayarları</div>
-            <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ background: 'var(--zy-card-bg, #fff)', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Varsayılan Özet Motoru</label>
                 <select style={selectStyle} value={settings.defaultEngine}
@@ -240,10 +240,10 @@ const Popup = () => {
         {activeTab === 'gemini-gem' && (
           <div>
             <div style={sectionTitle}>Gem URL</div>
-            <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px' }}>
+            <div style={{ background: 'var(--zy-card-bg, #fff)', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px' }}>
               <input
                 type="url"
-                style={{ ...inputStyle, borderColor: gemUrlError ? '#ef4444' : '#d1d5db' }}
+                style={{ ...inputStyle, borderColor: gemUrlError ? '#ef4444' : 'var(--zy-border, #d1d5db)' }}
                 value={gemSettings.gemUrl}
                 onChange={e => {
                   const url = e.target.value;
@@ -261,7 +261,7 @@ const Popup = () => {
             </div>
 
             <div style={sectionTitle}>Çalışma Seçenekleri</div>
-            <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px' }}>
+            <div style={{ background: 'var(--zy-card-bg, #fff)', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px' }}>
               <Toggle label="Mevcut Gemini sekmesini kullan" checked={gemSettings.useExistingTab} onChange={v => saveGem({ ...gemSettings, useExistingTab: v })} />
               <Toggle label="Arka planda açmayı dene" checked={gemSettings.tryBackgroundTab} onChange={v => saveGem({ ...gemSettings, tryBackgroundTab: v })} />
               <Toggle label="Başarısızsa görünür sekmede aç" checked={gemSettings.fallbackToVisibleTab} onChange={v => saveGem({ ...gemSettings, fallbackToVisibleTab: v })} />
@@ -272,7 +272,7 @@ const Popup = () => {
             </div>
 
             <div style={sectionTitle}>Durum</div>
-            <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px', fontSize: '13px' }}>
+            <div style={{ background: 'var(--zy-card-bg, #fff)', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px', fontSize: '13px' }}>
               {!gemSettings.gemUrl ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#f59e0b' }}>
                   <span>⚠</span> Gem URL ayarlanmadı
@@ -297,7 +297,7 @@ const Popup = () => {
               DeepSeek, NVIDIA veya OpenAI uyumlu herhangi bir API servisi burada yapılandırılabilir. API anahtarı bu Chrome profilinin yerel eklenti depolamasında tutulur.
             </div>
 
-            <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ background: 'var(--zy-card-bg, #fff)', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
                 <button onClick={() => updateProvider('openai-compatible', { baseUrl: 'https://integrate.api.nvidia.com/v1', model: 'deepseek-ai/deepseek-v4-flash', maxTokens: 16384 })}
                   style={{
@@ -335,7 +335,7 @@ const Popup = () => {
               />
               <button onClick={() => testConnection('openai-compatible')}
                 style={{
-                  width: '100%', padding: '8px', background: '#f3f4f6', border: '1px solid #d1d5db',
+                  width: '100%', padding: '8px', background: 'var(--zy-item-bg, #f3f4f6)', border: '1px solid #d1d5db',
                   borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
                   transition: 'background 0.15s',
                 }}
@@ -349,7 +349,7 @@ const Popup = () => {
           <div>
             <div style={sectionTitle}>Chrome Yerel AI Durumu</div>
             {localStatus ? (
-              <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px', fontSize: '13px' }}>
+              <div style={{ background: 'var(--zy-card-bg, #fff)', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px', fontSize: '13px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f3f4f6' }}>
                   <span>Destekleniyor mu?</span>
                   <span style={{ fontWeight: 700, color: localStatus.isSupported ? '#22c55e' : '#ef4444' }}>
@@ -364,7 +364,7 @@ const Popup = () => {
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
                   <span>İndirme Gerekiyor mu?</span>
-                  <span style={{ fontWeight: 700, color: localStatus.needsDownload ? '#f59e0b' : '#6b7280' }}>
+                  <span style={{ fontWeight: 700, color: localStatus.needsDownload ? '#f59e0b' : 'var(--zy-text-muted, #6b7280)' }}>
                     {localStatus.needsDownload ? 'Evet' : 'Hayır'}
                   </span>
                 </div>
@@ -374,7 +374,7 @@ const Popup = () => {
             )}
 
             {!localStatus?.isSupported && (
-              <div style={{ background: '#fef2f2', color: '#dc2626', padding: '10px 12px', borderRadius: '6px', fontSize: '12px', border: '1px solid #fecaca', marginTop: '12px' }}>
+              <div style={{ background: 'var(--zy-error-bg, #fef2f2)', color: 'var(--zy-error-text, #dc2626)', padding: '10px 12px', borderRadius: '6px', fontSize: '12px', border: '1px solid #fecaca', marginTop: '12px' }}>
                 Bu cihazda Chrome Yerel AI kullanılamıyor. Lütfen Chrome'un deneysel AI özelliklerini etkinleştirdiğinizden emin olun.
               </div>
             )}
@@ -385,7 +385,7 @@ const Popup = () => {
       {/* Fixed footer */}
       <div style={{
         padding: '8px 16px', borderTop: '1px solid #e5e7eb',
-        backgroundColor: '#fff', flexShrink: 0,
+        backgroundColor: 'var(--zy-card-bg, #fff)', flexShrink: 0,
         fontSize: '11px', color: '#9ca3af', textAlign: 'center',
       }}>
         ZYouTube v1.0.0

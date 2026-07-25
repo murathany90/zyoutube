@@ -153,9 +153,19 @@ function applyTheme() {
     const newBg = isDark ? '#1f1f1f' : '#f9fafb';
     if (container.style.getPropertyValue('--zy-bg') !== newBg) {
       container.style.setProperty('--zy-bg', newBg);
+      container.style.setProperty('--zy-card-bg', isDark ? '#2a2a2a' : '#ffffff');
       container.style.setProperty('--zy-header-bg', isDark ? '#282828' : '#ffffff');
       container.style.setProperty('--zy-text', isDark ? '#e5e7eb' : '#111827');
+      container.style.setProperty('--zy-text-muted', isDark ? '#9ca3af' : '#4b5563');
       container.style.setProperty('--zy-border', isDark ? '#3f3f46' : '#e5e7eb');
+      
+      // Additional variables for items and errors
+      container.style.setProperty('--zy-item-bg', isDark ? '#3f3f46' : '#f3f4f6');
+      container.style.setProperty('--zy-item-hover', isDark ? '#52525b' : '#e5e7eb');
+      container.style.setProperty('--zy-error-bg', isDark ? '#7f1d1d' : '#fef2f2');
+      container.style.setProperty('--zy-error-border', isDark ? '#991b1b' : '#fecaca');
+      container.style.setProperty('--zy-error-text', isDark ? '#fca5a5' : '#dc2626');
+      container.style.setProperty('--zy-card-inner', isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)');
     }
   }
 }

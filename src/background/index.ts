@@ -223,12 +223,9 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
           sendResponse({ success: false, error: 'Credentials in URL not allowed' });
           return true;
         }
-        if (!url.hostname.endsWith('.youtube.com') && url.hostname !== 'youtube.com') {
+        const validHost = url.hostname.includes('youtube.com') || url.hostname.includes('googlevideo.com') || url.hostname.includes('google.com');
+        if (!validHost) {
           sendResponse({ success: false, error: 'Invalid host' });
-          return true;
-        }
-        if (!url.pathname.startsWith('/api/timedtext')) {
-          sendResponse({ success: false, error: 'Invalid path' });
           return true;
         }
       }
@@ -244,7 +241,8 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
           // Post-redirect validation
           if (!isTestEnv) {
             const finalUrl = new URL(res.url);
-            if (!finalUrl.hostname.endsWith('.youtube.com') && finalUrl.hostname !== 'youtube.com') {
+            const validHost = finalUrl.hostname.includes('youtube.com') || finalUrl.hostname.includes('googlevideo.com') || finalUrl.hostname.includes('google.com');
+            if (!validHost) {
               throw new Error('Redirected to invalid host');
             }
           }
