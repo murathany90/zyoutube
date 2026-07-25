@@ -97,7 +97,7 @@ test.describe('Privacy and Security Validation', () => {
       });
     });
 
-    await page.route('https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ*', async (route) => {
+    await context.route('https://www.youtube.com/api/timedtext*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',

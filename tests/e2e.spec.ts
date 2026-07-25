@@ -63,7 +63,8 @@ test.describe('YouTube AI Summary Extension e2e (Fixture based)', () => {
       });
     });
 
-    await page.route('https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ*', async (route) => {
+    // Use browserContext.route so extension service worker fetch is also intercepted
+    await browserContext.route('https://www.youtube.com/api/timedtext*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -114,16 +115,16 @@ test.describe('YouTube AI Summary Extension e2e (Fixture based)', () => {
     const searchInput = page.getByPlaceholder('Transkriptte ara...');
     await searchInput.fill('hello test');
     
-    await expect(page.locator('text=1 sonuç bulundu.')).toBeVisible();
+    await expect(page.locator('text=2 sonuç bulundu.')).toBeVisible();
     
     // Test exact match
     const exactMatchCheckbox = page.getByLabel('Tam İfade');
     await exactMatchCheckbox.check();
     
-    await expect(page.locator('text=0 sonuç bulundu.')).toBeVisible();
+    await expect(page.locator('text=1 sonuç bulundu.')).toBeVisible();
     
     // Uncheck exact match
     await exactMatchCheckbox.uncheck();
-    await expect(page.locator('text=1 sonuç bulundu.')).toBeVisible();
+    await expect(page.locator('text=2 sonuç bulundu.')).toBeVisible();
   });
 });

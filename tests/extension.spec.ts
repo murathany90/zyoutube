@@ -90,7 +90,7 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
     });
 
     // Intercept caption request (must be on context because SW makes the request)
-    await browserContext.route('https://www.youtube.com/api/timedtext?v=fixtureVideoId', async (route) => {
+    await browserContext.route('https://www.youtube.com/api/timedtext*', async (route) => {
       let xml = '<?xml version="1.0" encoding="utf-8" ?><transcript>';
       for (let i = 0; i < 5000; i++) {
         xml += `<text start="${i}" dur="1">Virtual Segment ${i}</text>`;
