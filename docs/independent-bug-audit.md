@@ -22,7 +22,7 @@
 ### Hata Tablosu
 
 | ID | Önem | Tür | Dosya(lar) | Özet |
-|---|---|---|---|---|
+|---|---|---|---|---|---|
 | E1 | **P0** | Test | `tests/e2e.spec.ts`, `tests/extension.spec.ts`, `tests/privacy/privacy.spec.ts` | Panel container ID uyuşmazlığı (`panel-container` vs `panel-host`) |
 | E2 | **P1** | Panel | `src/content/index.tsx:464-470` | SPA geçişinde `destroy()` çağrılmıyor |
 | E3 | **P1** | Transkript | `src/transcript/youtube-provider.ts:83-127` | 5 katmanlı extraction zinciri, tek hata noktası |
@@ -37,6 +37,9 @@
 | E12 | **P3** | Panel | `src/content/index.tsx:438-457` | İlk page load'da panel mount için interval tabanlı polling |
 | E13 | **P3** | Test | `tests/extension.spec.ts` | Shadow DOM piercing kullanılmıyor |
 | E14 | **P3** | Transkript | `src/transcript/youtube-provider.ts:132-147` | Retry sırasında service worker uyuyabilir |
+| E15 | **P3** | Altyapı | `src/background/index.ts:219-239` | Background'da ölü `FETCH_CAPTION` handler'ı (`'Not implemented'` döner) |
+| E16 | **P2** | CSS | `src/content/index.tsx:360` | Buton YouTube CSS sınıflarına sıkı bağımlı (`yt-spec-button-shape-next-*`) |
+| E17 | **P3** | Diğer | — | Console'da ZYouTube dışı eklentilerden gelen hata mesajları |
 
 ---
 
@@ -344,6 +347,9 @@ Bu, panel'in **çalıştığını** ancak test ID'sinin yanlış olduğunu kanı
 7. **E7** (P2 — Panel mount) — Farklı YouTube layout desteği
 8. **E8** (P2 — Content-type) — Güvenlik iyileştirmesi
 9. **E9** (P2 — Buton CSS) — Uzun vadeli CSS koruması
+10. **E16** (P2 — Buton CSS sınıf bağımlılığı) — YouTube sınıf değişikliklerine karşı koruma
+11. **E15** (P3 — Ölü FETCH_CAPTION handler) — Kod temizliği
+12. **E17** (P3 — Diğer eklenti gürültüsü) — Bilgi amaçlı
 
 ---
 
@@ -401,6 +407,66 @@ Bu, panel'in **çalıştığını** ancak test ID'sinin yanlış olduğunu kanı
 | `src/styles/popup.css` | ✓ Evet | ✓ |
 | `src/content/runtime-messenger.ts` | ✗ **YOK** | N/A |
 | `src/gem/response-extractor.ts` | ✗ **YOK** | N/A |
+
+---
+
+---
+
+## K. `docs/handoff_prompt.md` Çapraz Referans Analizi
+
+Aşağıdaki tablo, önceki agent tarafından yazılan `handoff_prompt.md` içindeki iddiaların mevcut kod ve testlerle doğrulama sonucunu göstermektedir.
+
+| Handoff İddiası | Kod/Konum | Doğrulama | Durum |
+|---|---|---|---|
+| **Background fetching iptal edildi, content script'e taşındı** | `youtube-provider.ts:188-203` → `fetch(fetchUrl)` content script seviyesinden çağrılıyor. Background'daki `FETCH_CAPTION` handler (`index.ts:219-239`) `sendResponse({ success: false, error: 'Not implemented' })` dönüyor. | ✓ **Doğrulandı.** Fetch content script'ten yapılıyor. Background handler artık ölü kod. | ✅ Teyit edildi |
+
+| **FETCH_CAPTION background handler'ı ölü kod** | `background/index.ts:219-239` — Mesaj tipi union'da tanımlı (`index.ts:8`), handler mevcut ama hep `'Not implemented'` döner. Asla kullanılmıyor. | ✓ **Doğrulandı.** Bu handler çağrılırsa hata döner. Kaldırılmalı veya gerçek implementasyon eklenmeli. | 🔴 Yeni bulgu (E15/P3) |
+
+| **Buton enjeksiyonu: insertBefore ile ilk sıraya ekle** | `content/index.tsx:400-404`: `if (actionsRow.firstChild) { actionsRow.insertBefore(btn, actionsRow.firstChild); } else { actionsRow.appendChild(btn); }` | ✓ **Doğrulandı.** YouTube'un responsive buton sığdırma sorununa karşı `insertBefore` kullanılıyor. | ✅ Teyit edildi |
+
+| **SVG siyah kare sorunu düzeltildi** | `content/index.tsx:364-367`: `<svg height="24" viewBox="0 0 24 24" width="24" ... style="pointer-events: none; display: block; width: 24px; height: 24px;">` | ✓ **Doğrulandı.** SVG boyutları sabitlenmiş. | ✅ Teyit edildi |
+
+| **Buton YouTube CSS sınıflarını kullanıyor** | `content/index.tsx:360`: `btn.className = 'yt-spec-button-shape-next yt-spec-button-shape-next--tonal ...'` | ✓ **Doğrulandı.** YouTube'un kendi sınıfları kullanılıyor. YouTube bu sınıfları değiştirirse buton stylesız kalır. | ⚠️ P3 risk |
+
+| **Diğer eklentiler konsolu kirletiyor** | Handoff, `[Auto Youtube Shorts Scroller]` ve `content.ts.44ce3ab9.js Failed to fetch` hatalarının ZYouTube'a ait olmadığını belirtiyor. | ⚠️ **Kod incelemesi doğruladı:** Bu mesajlar ZYouTube kaynak kodunda yok. Ancak test sırasında bu hatalar görülürse ZYouTube'a atfedilmemeli. | ℹ️ Bilgi notu |
+
+| **Transkript fetch URL yapısı** | `youtube-provider.ts:189`: `const fetchUrl = track.baseUrl + (track.baseUrl.includes('?') ? '&fmt=json3' : '?fmt=json3');` | ✓ **Doğrulandı.** `fmt=json3` parametresi doğru ekleniyor. | ✅ Teyit edildi |
+
+| **Buton DOM'dan kaybolma / overflow** | Handoff, YouTube responsive yapısının butonu `overflow: hidden` ile gizleyebileceğini belirtiyor. | ⚠️ **Kod incelemesi:** `insertBefore(btn, actionsRow.firstChild)` ile ilk sıraya ekleniyor ancak bu, YouTube'un `overflow: hidden` container'ında yine de gizlenmesini engellemeyebilir. | ⚠️ Kısmi risk |
+
+| **Panel Shadow DOM izolasyonu** | Handoff, butonun Shadow DOM dışında olduğunu belirtiyor. | ✓ **Doğrulandı.** Panel (`#zyoutube-panel-host`) Shadow DOM içinde. Buton (`#ai-summary-btn`) YouTube ana DOM'unda. | ✅ Teyit edildi |
+
+### Handoff'te belirtilen dosyalar incelendi
+
+| Dosya | Handoff'ta belirtilen | Mevcut koddaki durum |
+|---|---|---|
+| `src/content/index.tsx` | `injectButton()` fonksiyonu | `index.tsx:349-406` — mevcut ve incelendi |
+| `src/transcript/youtube-provider.ts` | `fetchTranscript` metodu | `youtube-provider.ts:188-246` — mevcut ve incelendi |
+
+### Handoff'ta belirtilen Görev 1, 2, 3'e karşılık gelen mevcut hata ID'leri
+
+| Handoff Görevi | Açıklama | İlgili Hata ID |
+|---|---|---|
+| **Görev 1** — Buton enjeksiyonu sağlama | `injectButton()`'un stabil çalışması, doğru selector/append mantığı | E9 (P2), yeni E16 (P2) |
+| **Görev 2** — Transkript fetch başarısı | `fetchTranscript`'in content script'ten kusursuz çalışması | E3 (P1), yeni E15 (P3) |
+| **Görev 3** — İzole panel / alternatif buton yeri | Shadow DOM panel, buton için alternatif yerleşim | E7 (P2), E9 (P2) |
+
+### Handoff analizinden eklenen yeni hatalar
+
+| ID | Önem | Hata | Dosya | Açıklama |
+|---|---|---|---|---|
+| E15 | **P3** | Background'da ölü `FETCH_CAPTION` handler'ı | `src/background/index.ts:219-239` | Kod `'Not implemented'` döner, hiçbir yerde çağrılmaz. Kafa karıştırıcı ve gereksiz kod. |
+| E16 | **P2** | Buton YouTube CSS sınıflarına sıkı bağımlı | `src/content/index.tsx:360` | `yt-spec-button-shape-next-*` sınıfları YouTube tarafından değiştirilirse buton stylesız kalır. |
+| E17 | **P3** | Console'da ZYouTube dışı eklenti hataları | — | `[Auto Youtube Shorts Scroller]` gibi hatalar ZYouTube'a ait değil, ancak hata ayıklamayı zorlaştırabilir. |
+
+### Handoff ile audit raporu arasındaki farklar
+
+| Konu | Handoff'taki ifade | Audit raporu tespiti |
+|---|---|---|
+| Background fetch | Tamamen content script'e taşındığı belirtilmiş | Background'da hâlâ `FETCH_CAPTION` handler'ı var — **ölü kod** |
+| Transkript zinciri | Sadece fetch adımına odaklanmış | **5 katmanlı** extraction zinciri (bridge → background → MAIN world → background → content) tespit edildi |
+| Panel container | `#zyoutube-panel-host` ID'si | Aynı tespit |
+| CSS regresyonu | Giderildi varsayılmış | Shadow DOM + `preflight: false` ile giderildiği **doğrulandı** |
 
 ---
 

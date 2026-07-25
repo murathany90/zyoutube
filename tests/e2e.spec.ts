@@ -41,12 +41,15 @@ test.describe('YouTube AI Summary Extension e2e (Fixture based)', () => {
     }
     
     // Open the panel if not open
-    const panel = page.locator('#zyoutube-panel-container');
+    const panel = page.locator('#zyoutube-panel-host');
     const isPanelVisible = await panel.isVisible();
     if (!isPanelVisible) {
       await button.click();
-      await expect(panel).toBeVisible();
+      await expect(panel).toBeVisible({ timeout: 5000 });
     }
+    // Verify Shadow Root exists
+    const hasShadowRoot = await panel.evaluate(el => Boolean(el.shadowRoot));
+    expect(hasShadowRoot).toBe(true);
     // Switch to Transcript tab
     const transcriptTabBtn = page.getByRole('button', { name: 'Transkript' });
     await expect(transcriptTabBtn).toBeVisible();

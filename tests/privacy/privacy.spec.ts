@@ -71,12 +71,15 @@ test.describe('Privacy and Security Validation', () => {
     await summaryBtn.waitFor({ state: 'visible', timeout: 5000 });
     
     // Open the panel if not open
-    const panel = page.locator('#zyoutube-panel-container');
+    const panel = page.locator('#zyoutube-panel-host');
     const isPanelVisible = await panel.isVisible();
     if (!isPanelVisible) {
       await summaryBtn.click();
       await expect(panel).toBeVisible();
     }
+    // Verify Shadow Root exists
+    const hasShadowRoot = await panel.evaluate(el => Boolean(el.shadowRoot));
+    expect(hasShadowRoot).toBe(true);
 
     // Start generating summary
     await page.locator('button', { hasText: /Özetle/ }).first().click();

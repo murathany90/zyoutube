@@ -111,8 +111,11 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
     
     // Panel otomatik açılmış olmalı (varsayılan ayar) veya butona basarak açılır
     // Panel açıldı mı?
-    const panel = page.locator('#zyoutube-panel-container');
+    const panel = page.locator('#zyoutube-panel-host');
     await expect(panel).toBeVisible({ timeout: 5000 });
+    // Verify Shadow Root exists
+    const hasShadowRoot = await panel.evaluate(el => Boolean(el.shadowRoot));
+    expect(hasShadowRoot).toBe(true);
 
     // Transkript sekmesine geçiş
     const transcriptTabBtn = page.getByRole('button', { name: 'Transkript' });
