@@ -5,7 +5,7 @@ import { GemSettingsService } from '../gem/settings';
 export type ExtensionMessage =
   | { type: 'YOUTUBE_URL_CHANGED'; url: string }
   | { type: 'GET_PLAYER_RESPONSE'; requestId: string; expectedVideoId: string }
-  | { type: 'FETCH_CAPTION'; requestId: string; url: string }
+  | { type: 'FETCH_CAPTION'; requestId: string; videoId: string; track: { baseUrl: string; languageCode: string; kind?: string }; format: 'json3' | 'xml' }
   | { type: 'START_SUMMARY'; request: SummaryRequest }
   | { type: 'CANCEL_SUMMARY'; taskId: string }
   | { type: 'GET_PANEL_SETTINGS' }
@@ -141,22 +141,116 @@ export function setupMessageRouter() {
   });
 }
 
-function handleFetchCaption(message: any, sendResponse: (response: any) => void) {
-  try {
-    const url = new URL(message.url);
-    const isLocalhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-    const isTestEnv = (typeof globalThis !== 'undefined' && (globalThis as any).process && (globalThis as any).process.env.NODE_ENV === 'test') || isLocalhost;
+function hostnameMatches(hostname: string, domain: string): boolean {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
 
-    if (!isTestEnv) {
-      if (url.protocol !== 'https:') {
-        sendResponse({ success: false, error: 'HTTPS required' });
+const CAPTION_ALLOWED_HOSTS = ['youtube.com', 'googlevideo.com'];
+const CAPTION_FETCH_TIMEOUT_MS = 15000;
+const MAX_CAPTION_BODY_BYTES = 5 * 1024 * 1024;
+
+function handleFetchCaption(message: any, sendResponse: (response: any) => void) {
+  const { videoId, track, format, requestId } = message;
+
+  if (!videoId || !track?.baseUrl) {
+    sendResponse({ success: false, error: 'CAPTION_URL_REJECTED', code: 'MISSING_FIELDS' });
+    return;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(track.baseUrl);
+  } catch {
+    sendResponse({ success: false, error: 'CAPTION_URL_REJECTED', code: 'INVALID_URL' });
+    return;
+  }
+
+  const hostname = url.hostname.toLowerCase();
+  const isAllowedHost = CAPTION_ALLOWED_HOSTS.some(d => hostnameMatches(hostname, d));
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+
+  if (!isLocalhost && !isAllowedHost) {
+    sendResponse({ success: false, error: 'CAPTION_URL_REJECTED', code: 'HOST_NOT_ALLOWED', host: hostname });
+    return;
+  }
+
+  if (!isLocalhost && url.protocol !== 'https:') {
+    sendResponse({ success: false, error: 'CAPTION_URL_REJECTED', code: 'HTTPS_REQUIRED' });
+    return;
+  }
+
+  if (url.username || url.password) {
+    sendResponse({ success: false, error: 'CAPTION_URL_REJECTED', code: 'CREDENTIALS_IN_URL' });
+    return;
+  }
+
+  const isTimedtextEndpoint = url.pathname.includes('timedtext') || hostname === 'www.youtube.com';
+  if (!isLocalhost && !isTimedtextEndpoint) {
+    sendResponse({ success: false, error: 'CAPTION_URL_REJECTED', code: 'INVALID_PATH', path: url.pathname });
+    return;
+  }
+
+  // Build fetch URL with requested format
+  const fetchUrlStr = track.baseUrl + (track.baseUrl.includes('?') ? `&fmt=${format}` : `?fmt=${format}`);
+
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), CAPTION_FETCH_TIMEOUT_MS);
+
+  fetch(fetchUrlStr, { signal: abortController.signal })
+    .then(async (response) => {
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        sendResponse({ success: false, error: `CAPTION_FETCH_HTTP_ERROR`, code: `HTTP_${response.status}` });
         return;
       }
-    }
-    sendResponse({ success: false, error: 'Not implemented' });
-  } catch (e: any) {
-    sendResponse({ success: false, error: e.message });
-  }
+
+      const contentType = response.headers.get('content-type') || '';
+
+      // Reject HTML
+      if (contentType.includes('text/html') || contentType.includes('text/html')) {
+        sendResponse({ success: false, error: 'CAPTION_RESPONSE_HTML', code: 'HTML_REJECTED' });
+        return;
+      }
+
+      // Reject too-large response
+      const contentLength = response.headers.get('content-length');
+      if (contentLength && parseInt(contentLength) > MAX_CAPTION_BODY_BYTES) {
+        sendResponse({ success: false, error: 'CAPTION_FETCH_FAILED', code: 'RESPONSE_TOO_LARGE' });
+        return;
+      }
+
+      const rawText = await response.text();
+
+      if (!rawText || !rawText.trim()) {
+        sendResponse({ success: false, error: 'CAPTION_FETCH_FAILED', code: 'EMPTY_BODY' });
+        return;
+      }
+
+      // Body sniffing: reject HTML pages even without content-type header
+      const trimmed = rawText.trim();
+      if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) {
+        sendResponse({ success: false, error: 'CAPTION_RESPONSE_HTML', code: 'HTML_SNIFFED' });
+        return;
+      }
+
+      sendResponse({
+        success: true,
+        data: {
+          rawText,
+          format,
+          requestId
+        }
+      });
+    })
+    .catch((e: any) => {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        sendResponse({ success: false, error: 'CAPTION_FETCH_TIMEOUT', code: 'TIMEOUT' });
+      } else {
+        sendResponse({ success: false, error: 'CAPTION_FETCH_FAILED', code: e.message });
+      }
+    });
 }
 
 function fetchPlayerResponseFromMainWorld(expectedVideoId: string): any {

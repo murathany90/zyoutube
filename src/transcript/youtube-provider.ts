@@ -2,6 +2,7 @@ import { ITranscriptProvider, CaptionTrack, TranscriptResult, TranscriptError } 
 import { parseTranscript } from './parser';
 import { evaluateQuality } from './quality';
 import { getPlayerResponseFromMainWorld } from '../content/bridge';
+import { sendRuntimeMessage, RuntimeMessengerError } from '../content/runtime-messenger';
 
 export class YouTubeTranscriptProvider implements ITranscriptProvider {
   
@@ -186,19 +187,49 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
   }
 
   async fetchTranscript(videoId: string, track: CaptionTrack, abortController?: AbortController): Promise<TranscriptResult> {
-    const fetchUrl = track.baseUrl + (track.baseUrl.includes('?') ? '&fmt=json3' : '?fmt=json3');
     let rawText: string;
     try {
-      const response = await fetch(fetchUrl, {
-         signal: abortController?.signal
-      });
-      if (!response.ok) {
-         throw new Error(`HTTP ${response.status}`);
+      const response = await sendRuntimeMessage<any, { success: boolean; data?: { rawText: string; format: string }; error?: string; code?: string }>(
+        {
+          type: 'FETCH_CAPTION',
+          requestId: `fetch_${Date.now()}`,
+          videoId,
+          track: { baseUrl: track.baseUrl, languageCode: track.languageCode, kind: track.kind },
+          format: 'json3'
+        },
+        {
+          timeoutMs: 20000,
+          signal: abortController?.signal
+        }
+      );
+
+      if (!response.success || !response.data) {
+        const errorCode = response.code || response.error || 'UNKNOWN';
+        if (errorCode === 'CAPTION_URL_REJECTED' || errorCode === 'HOST_NOT_ALLOWED') {
+          throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı URL\'si güvenlik nedeniyle reddedildi.', {
+            expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode
+          });
+        }
+        throw new TranscriptError('CAPTION_FETCH_FAILED', `Altyazı alınamadı: ${response.error || 'Bilinmeyen hata'}`, {
+          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode
+        });
       }
-      rawText = await response.text();
+
+      rawText = response.data.rawText;
     } catch (e: any) {
+      if (e instanceof TranscriptError) throw e;
+      if (e instanceof RuntimeMessengerError) {
+        if (e.code === 'BACKGROUND_TIMEOUT') {
+          throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı isteği zaman aşımına uğradı.', {
+            expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'FETCH_TIMEOUT'
+          });
+        }
+        throw new TranscriptError('CAPTION_FETCH_FAILED', `Arka plan servisi hatası: ${e.message}`, {
+          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: e.code
+        });
+      }
       throw new TranscriptError('CAPTION_FETCH_FAILED', `Altyazı dosyası indirilemedi: ${e.message}`, {
-         expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: e.message
+        expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: e.message
       });
     }
 
@@ -221,7 +252,7 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: e.message
        });
     }
-    
+
     const playerResponse = await this.getPlayerResponse(videoId);
     if (!playerResponse || playerResponse.videoId !== videoId) {
        throw new Error('Video has changed, aborting transcript generation');
@@ -235,7 +266,7 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
       videoId,
       videoDurationMs,
       selectedTrack: track,
-      availableTracks: [track], 
+      availableTracks: [track],
       segments,
       rawSegmentCount,
       cleanSegmentCount: segments.length,
