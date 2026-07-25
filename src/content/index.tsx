@@ -346,13 +346,16 @@ if (window.location.href.includes('youtube.com/watch') || window.location.href.i
 }
 
 // SPA navigasyon
-chrome.runtime.onMessage.addListener((message) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'YOUTUBE_URL_CHANGED') {
     panelHiddenForTab = false; // Yeni videoda geçici gizleme sıfırla
     init();
   } else if (message.type === 'PANEL_SETTINGS_CHANGED') {
     // Popup'tan toggle değişimi
     init();
+  } else if (message.type === 'COPY_TO_CLIPBOARD') {
+    navigator.clipboard.writeText(message.text).catch(err => console.error('Panoya kopyalanamadı', err));
+    if (sendResponse) sendResponse({ success: true });
   }
 });
 

@@ -93,10 +93,12 @@ export class GemController {
       // 4. Panoya kopyala (ayara göre)
       if (gemSettings.copyToClipboard) {
         try {
-          // Service worker'da clipboard API yok, bu işlem content script üzerinden yapılmalı
-          // Burada flag olarak işaretliyoruz
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (tabs.length > 0 && tabs[0].id) {
+            chrome.tabs.sendMessage(tabs[0].id, { type: 'COPY_TO_CLIPBOARD', text: prompt }).catch(() => {});
+          }
         } catch {
-          // Clipboard erişimi olmayabilir
+          // Ignore
         }
       }
 

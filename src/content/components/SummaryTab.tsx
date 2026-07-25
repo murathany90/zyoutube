@@ -68,8 +68,13 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
 
       const provider = new YouTubeTranscriptProvider();
       const tracks = await provider.getAvailableTracks(videoId);
-      if (tracks.length === 0) throw new Error('Transkript bulunamadı.');
-      const track = tracks.find(t => t.languageCode === selectedLanguage) || tracks[0];
+      
+      const preferredLang = selectedLanguage.includes('tr') ? 'tr' : 'en';
+      let track = tracks.find(t => t.languageCode === preferredLang && t.sourceType === 'manual');
+      if (!track) track = tracks.find(t => t.languageCode === preferredLang);
+      if (!track) track = tracks.find(t => t.sourceType === 'manual');
+      if (!track) track = tracks[0];
+      
       const transcriptResult = await provider.fetchTranscript(videoId, track);
 
       const request: SummaryRequest = {
@@ -100,7 +105,11 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
         request,
       });
     } catch (e: any) {
-      setError(e.message || 'Transkript çekilemedi.');
+      let msg = e.message || 'Transkript çekilemedi.';
+      if (e.diagnostics) {
+         msg += `\n[Tanılama: ${e.diagnostics.extractionSource}, Tracks: ${e.diagnostics.trackCount}]`;
+      }
+      setError(msg);
       setIsProcessing(false);
       setStatus('failed');
     }

@@ -1,4 +1,4 @@
-export const getPlayerResponseFromMainWorld = (expectedVideoId: string): Promise<any> => {
+export const getPlayerResponseFromMainWorld = (expectedVideoId: string): Promise<{ success: boolean; data?: any; error?: string }> => {
   return new Promise((resolve) => {
     try {
       chrome.runtime.sendMessage(
@@ -6,18 +6,17 @@ export const getPlayerResponseFromMainWorld = (expectedVideoId: string): Promise
         (response) => {
           if (chrome.runtime.lastError) {
             console.error('bridge error:', chrome.runtime.lastError.message);
-            resolve(null);
-          } else if (response && response.success) {
-            resolve(response.data);
+            resolve({ success: false, error: chrome.runtime.lastError.message });
           } else {
-            console.error('bridge response error:', response?.error);
-            resolve(null);
+            // Background script now returns { success, data, error }
+            // data contains diagnostics even if success is false
+            resolve(response || { success: false, error: 'Empty response' });
           }
         }
       );
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to send message to background', e);
-      resolve(null);
+      resolve({ success: false, error: e.message });
     }
   });
 };

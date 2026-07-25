@@ -101,9 +101,21 @@ const Popup = () => {
     const validation = ConfigValidator.validate(config || {});
     if (!validation.isValid) {
       alert('Geçersiz Ayarlar:\n' + validation.errors.join('\n'));
-    } else {
-      alert('Ayarlar geçerli. (Bağlantı testi henüz uygulanmadı)');
+      return;
     }
+    
+    // Save settings before testing
+    saveGeneralSettings(settings).then(() => {
+      chrome.runtime.sendMessage({ type: 'TEST_CONNECTION', providerId: id }, (response) => {
+        if (chrome.runtime.lastError) {
+          alert('Bağlantı hatası: ' + chrome.runtime.lastError.message);
+        } else if (response && response.success) {
+          alert(`Bağlantı Başarılı!\nGecikme: ${response.latencyMs}ms`);
+        } else {
+          alert(`Bağlantı Başarısız!\nHata: ${response?.message || 'Bilinmeyen hata'}`);
+        }
+      });
+    });
   };
 
   const validateGemUrl = (url: string) => {
@@ -286,6 +298,14 @@ const Popup = () => {
             </div>
 
             <div style={{ background: '#fff', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                <button onClick={() => updateProvider('openai-compatible', { baseUrl: 'https://integrate.api.nvidia.com/v1', model: 'deepseek-ai/deepseek-v4-flash', maxTokens: 16384 })}
+                  style={{
+                    flex: 1, padding: '6px', background: '#ecfccb', border: '1px solid #bef264',
+                    color: '#4d7c0f', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer',
+                  }}
+                >NVIDIA NIM Profili (DeepSeek)</button>
+              </div>
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Base URL</label>
                 <input type="url" style={inputStyle}
