@@ -347,7 +347,7 @@ class YouTubeContentController {
   }
 
   private injectButton(): boolean {
-    const actionsRow = document.querySelector('#top-level-buttons-computed');
+    const actionsRow = document.querySelector('#top-level-buttons-computed') || document.querySelector('ytd-menu-renderer #top-level-buttons') || document.querySelector('#actions-inner');
     if (!actionsRow) return false;
 
     if (document.getElementById('ai-summary-btn')) return true;
@@ -360,7 +360,7 @@ class YouTubeContentController {
     btn.className = 'yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m yt-spec-button-shape-next--icon-leading';
     btn.style.marginLeft = '8px';
     btn.innerHTML = `
-      <div class="yt-spec-button-shape-next__icon" aria-hidden="true" style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px;">
+      <div class="yt-spec-button-shape-next__icon">
         <svg height="24" viewBox="0 0 24 24" width="24" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;">
           <path d="M12 2L9.19 8.63L2 9.24L7.65 13.97L5.82 21L12 17.27L18.18 21L16.35 13.97L22 9.24L14.81 8.63L12 2Z" fill="currentColor"></path>
         </svg>
@@ -397,7 +397,11 @@ class YouTubeContentController {
       this.updateButtonState();
     });
 
-    actionsRow.appendChild(btn);
+    if (actionsRow.firstChild) {
+      actionsRow.insertBefore(btn, actionsRow.firstChild);
+    } else {
+      actionsRow.appendChild(btn);
+    }
     return true;
   }
 
