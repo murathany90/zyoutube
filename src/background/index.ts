@@ -12,6 +12,7 @@ export type ExtensionMessage =
   | { type: 'GET_GEM_SETTINGS' }
   | { type: 'PANEL_SETTINGS_CHANGED' }
   | { type: 'COPY_TO_CLIPBOARD'; text: string }
+  | { type: 'PING_BACKGROUND' }
   | { type: 'TEST_CONNECTION'; providerId: any };
 
 console.log('Background service worker initialized.');
@@ -152,6 +153,15 @@ function fetchPlayerResponseFromMainWorld(expectedVideoId: string): any {
 }
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendResponse) => {
+  if (message.type === 'PING_BACKGROUND') {
+    sendResponse({ 
+      success: true, 
+      extensionVersion: chrome.runtime.getManifest().version,
+      timestamp: Date.now()
+    });
+    return true;
+  }
+
   // Panel/Gem settings requests (from popup — no tab required)
   if (message.type === 'GET_PANEL_SETTINGS') {
     GemSettingsService.getPanelSettings().then(s => sendResponse(s)).catch(() => sendResponse(null));

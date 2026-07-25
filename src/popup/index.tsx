@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { useState, useEffect } from 'react';
-import '../index.css';
+import '../styles/popup.css';
 import { AISettingsService } from '../settings/ai-settings';
 import { ExtensionSettings, DEFAULT_SETTINGS, AIProviderConfig, AIProviderId } from '../settings/types';
 import { GemSettingsService } from '../gem/settings';
