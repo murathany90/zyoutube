@@ -278,7 +278,10 @@ class YouTubeContentController {
 
   private mountPanel(videoId: string): boolean {
     const secondary = document.querySelector('#secondary-inner') || document.querySelector('#secondary');
-    if (!secondary) return false;
+    if (!secondary) {
+      console.log('ZYouTube: mountPanel failed! Could not find #secondary-inner or #secondary in the DOM.');
+      return false;
+    }
 
     if (document.getElementById('zyoutube-panel-host')) {
       if (videoId !== this.currentVideoId) {
@@ -366,18 +369,27 @@ class YouTubeContentController {
     `;
 
     btn.addEventListener('click', () => {
+      console.log('ZYouTube: Button clicked. isInvalidated:', this.isInvalidated, 'panelHidden:', this.panelHiddenForTab);
       if (this.isInvalidated) return;
       if (this.panelHiddenForTab) {
         this.panelHiddenForTab = false;
         const vid = this.getVideoId();
-        if (vid) this.mountPanel(vid);
+        console.log('ZYouTube: videoId:', vid);
+        if (vid) {
+           const mounted = this.mountPanel(vid);
+           console.log('ZYouTube: mountPanel result:', mounted);
+        }
       } else if (document.getElementById('zyoutube-panel-host')) {
         this.panelHiddenForTab = true;
         this.unmountPanel();
       } else {
         this.panelHiddenForTab = false;
         const vid = this.getVideoId();
-        if (vid) this.mountPanel(vid);
+        console.log('ZYouTube: videoId (else):', vid);
+        if (vid) {
+           const mounted = this.mountPanel(vid);
+           console.log('ZYouTube: mountPanel result (else):', mounted);
+        }
       }
       this.updateButtonState();
     });
