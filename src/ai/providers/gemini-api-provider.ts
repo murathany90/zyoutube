@@ -70,8 +70,8 @@ export class GeminiApiProvider implements AIProvider {
     const model = config.model || 'gemini-2.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.apiKey}`;
 
-    const systemPrompt = PromptBuilder.buildSystemPrompt(request);
-    const userPrompt = PromptBuilder.buildUserPrompt(request);
+    const systemPrompt = PromptBuilder.buildSystemPrompt(request, context.promptType);
+    const userPrompt = PromptBuilder.buildUserPrompt(request, context.promptType, context.customContent);
 
     const body = {
       systemInstruction: {
@@ -144,7 +144,9 @@ export class GeminiApiProvider implements AIProvider {
         request.video.videoId,
         this.id,
         model,
-        request.options
+        request.options,
+        request.video.durationMs || undefined,
+        request.transcript.segments
       );
 
       // Add token usage if available

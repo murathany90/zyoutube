@@ -80,8 +80,8 @@ export class OpenAICompatibleProvider implements AIProvider {
     const url = `${urlStr}/chat/completions`;
 
     const model = config.model || 'gpt-3.5-turbo';
-    const systemPrompt = PromptBuilder.buildSystemPrompt(request);
-    const userPrompt = PromptBuilder.buildUserPrompt(request);
+    const systemPrompt = PromptBuilder.buildSystemPrompt(request, context.promptType);
+    const userPrompt = PromptBuilder.buildUserPrompt(request, context.promptType, context.customContent);
 
     const body = {
       model: model,
@@ -153,7 +153,9 @@ export class OpenAICompatibleProvider implements AIProvider {
         request.video.videoId,
         this.id,
         model,
-        request.options
+        request.options,
+        request.video.durationMs || undefined,
+        request.transcript.segments
       );
 
       if (data.usage) {

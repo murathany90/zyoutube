@@ -21,7 +21,7 @@ const Popup = () => {
   const saveSettings = async (newSettings: ExtensionSettings) => {
     await AISettingsService.saveSettings(newSettings);
     setSettings(newSettings);
-    setSaveStatus('Ayarlar kaydedildi!');
+    setSaveStatus('Ayarlar kaydedildi');
     setTimeout(() => setSaveStatus(''), 3000);
   };
 
@@ -29,15 +29,31 @@ const Popup = () => {
     saveSettings({ ...settings, ...updates });
   };
 
-  const updateProvider = (id: AIProviderId, updates: Partial<AIProviderConfig>) => {
+  const updateProvider = async (id: AIProviderId, updates: Partial<AIProviderConfig>) => {
+    // URL değiştiyse izin iste (sadece openai-compatible için)
+    if (id === 'openai-compatible' && updates.baseUrl) {
+      try {
+        const url = new URL(updates.baseUrl);
+        const origin = `${url.protocol}//${url.hostname}${url.port ? ':' + url.port : ''}/*`;
+        if (chrome.permissions && chrome.permissions.request) {
+          const granted = await new Promise(resolve => {
+            chrome.permissions.request({ origins: [origin] }, (granted) => resolve(granted));
+          });
+          if (!granted) {
+             alert('Bağlantı için izin verilmedi. İstekler başarısız olabilir.');
+          }
+        }
+      } catch (e) {
+        // Invalid URL, let validation handle it later
+      }
+    }
+
     const newProviders = { ...settings.providers };
     newProviders[id] = { ...newProviders[id], ...updates };
     saveSettings({ ...settings, providers: newProviders });
   };
 
   const testConnection = async (id: AIProviderId) => {
-     // TODO: Actually send a message to background to test since popup might have CORS issues
-     // For now just validate locally
      const config = settings.providers[id];
      const validation = ConfigValidator.validate(config);
      if (!validation.isValid) {
@@ -56,19 +72,24 @@ const Popup = () => {
   };
 
   return (
-    <div className="w-[400px] h-[550px] bg-white text-gray-800 flex flex-col font-sans">
-      <div className="bg-red-600 text-white p-4 flex justify-between items-center shadow-md z-10 relative">
-        <h1 className="text-xl font-bold tracking-tight">AI Özet & Transkript</h1>
-        <button onClick={openPanel} className="text-sm bg-red-700 hover:bg-red-800 px-3 py-1 rounded shadow-sm transition">
+    <div className="w-96 min-h-[400px] flex flex-col bg-gray-50 text-gray-900">
+      <header className="flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200">
+        <h1 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+          <svg className="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M21.583 6.846c-.204-1.396-1.145-2.52-2.368-2.736C17.119 3.75 12 3.75 12 3.75s-5.12 0-7.215.36c-1.223.216-2.164 1.34-2.368 2.736C2 8.71 2 12 2 12s0 3.29.417 5.154c.204 1.396 1.145 2.52 2.368 2.736 2.095.36 7.215.36 7.215.36s5.12 0 7.215-.36c1.223-.216 2.164-1.34 2.368-2.736.417-1.864.417-5.154.417-5.154s0-3.29-.417-5.154zM9.996 15.596V8.404L15.811 12l-5.815 3.596z" />
+          </svg>
+          AI Özet Ayarları
+        </h1>
+        <button onClick={openPanel} className="text-xs bg-red-600 text-white px-2 py-1 rounded shadow-sm hover:bg-red-700">
           Panel'i Aç
         </button>
-      </div>
-      
-      <div className="flex border-b text-sm font-medium">
-        <button onClick={() => setActiveTab('general')} className={`flex-1 py-2 \${activeTab === 'general' ? 'border-b-2 border-red-600 text-red-600' : 'text-gray-600 hover:bg-gray-50'}`}>Genel</button>
-        <button onClick={() => setActiveTab('gemini')} className={`flex-1 py-2 \${activeTab === 'gemini' ? 'border-b-2 border-red-600 text-red-600' : 'text-gray-600 hover:bg-gray-50'}`}>Gemini</button>
-        <button onClick={() => setActiveTab('openai')} className={`flex-1 py-2 \${activeTab === 'openai' ? 'border-b-2 border-red-600 text-red-600' : 'text-gray-600 hover:bg-gray-50'}`}>OpenAI</button>
-        <button onClick={() => setActiveTab('local')} className={`flex-1 py-2 \${activeTab === 'local' ? 'border-b-2 border-red-600 text-red-600' : 'text-gray-600 hover:bg-gray-50'}`}>Yerel AI</button>
+      </header>
+
+      <div className="flex border-b text-sm font-medium bg-white">
+        <button onClick={() => setActiveTab('general')} className={`flex-1 py-2 ${activeTab === 'general' ? 'border-b-2 border-red-600 text-red-600' : 'text-gray-600 hover:bg-gray-50'}`}>Genel</button>
+        <button onClick={() => setActiveTab('gemini')} className={`flex-1 py-2 ${activeTab === 'gemini' ? 'border-b-2 border-red-600 text-red-600' : 'text-gray-600 hover:bg-gray-50'}`}>Gemini</button>
+        <button onClick={() => setActiveTab('openai')} className={`flex-1 py-2 ${activeTab === 'openai' ? 'border-b-2 border-red-600 text-red-600' : 'text-gray-600 hover:bg-gray-50'}`}>OpenAI</button>
+        <button onClick={() => setActiveTab('local')} className={`flex-1 py-2 ${activeTab === 'local' ? 'border-b-2 border-red-600 text-red-600' : 'text-gray-600 hover:bg-gray-50'}`}>Yerel AI</button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 bg-gray-50">

@@ -13,8 +13,8 @@ export class ConfigValidator {
       try {
         const url = new URL(config.baseUrl);
 
-        if (url.protocol !== 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
-          errors.push('Base URL güvenli (https) olmalıdır.');
+        if (url.protocol !== 'https:') {
+          errors.push('Base URL güvenli (https) olmalıdır. Localhost ve HTTP desteklenmez.');
         }
 
         if (['file:', 'javascript:', 'data:'].includes(url.protocol)) {

@@ -92,9 +92,13 @@ export interface ConnectionTestResult {
   latencyMs?: number;
 }
 
+export type PromptType = 'single' | 'chunk' | 'merge';
+
 export interface ProviderExecutionContext {
   signal?: AbortSignal;
   onProgress?: (status: string, progress?: number) => void;
+  promptType?: PromptType;
+  customContent?: string;
 }
 
 export interface AIProvider {

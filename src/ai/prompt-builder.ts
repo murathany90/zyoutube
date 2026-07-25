@@ -1,37 +1,47 @@
-import { SummaryRequest } from './types';
+import { SummaryRequest, PromptType } from './types';
 
 export class PromptBuilder {
-  static buildSystemPrompt(request: SummaryRequest): string {
+  static buildSystemPrompt(request: SummaryRequest, type: PromptType = 'single'): string {
     const langInstructions = this.getLanguageInstructions(request.options.outputLanguage);
     const lengthInstructions = this.getLengthInstructions(request.options.length);
 
-    return `Sen uzman bir video analiz asistanısın. Görevin, sana sağlanan video transkriptini temel alarak yapılandırılmış bir özet üretmektir.
+    let role = `Sen uzman bir video analiz asistanısın. Görevin, sana sağlanan video transkriptini temel alarak yapılandırılmış bir özet üretmektir.`;
+    if (type === 'chunk') {
+       role = `Sen uzman bir video analiz asistanısın. Görevin, sana sağlanan VİDEONUN SADECE BİR KISMINA ait transkripti analiz ederek, bu kısımla ilgili yapılandırılmış bir ara özet (intermediate summary) üretmektir.`;
+    } else if (type === 'merge') {
+       role = `Sen uzman bir video analiz asistanısın. Görevin, uzun bir videonun çeşitli kısımlarından üretilmiş ARA ÖZETLERİ (JSON dizisi olarak sağlanacaktır) birleştirerek, TEK VE NİHAİ yapılandırılmış bir özet JSON'u oluşturmaktır. Tekrarlanan fikirleri azalt, en önemli 5 ana fikri seç. Zaman damgalarının (timestamps) sınırlarını ve doğruluğunu koru.`;
+    }
+
+    return `${role}
 
 KURALLAR:
-1. YALNIZCA sağlanan transkript içeriğine dayan. Transkriptte bulunmayan hiçbir bilgiyi uydurma (halüsinasyon yapma).
-2. Transkriptte konuyla ilgili bilgi yoksa, bunu açıkça belirt ("Bu konu hakkında bilgi verilmemiştir" vb.).
+1. YALNIZCA sağlanan içeriğe dayan. Bulunmayan hiçbir bilgiyi uydurma (halüsinasyon yapma).
+2. Transkriptte konuyla ilgili bilgi yoksa, bunu açıkça belirt.
 3. Zaman damgalarını (timestamps) YALNIZCA verilen segmentlerden al.
 4. Videoda doğrudan belirtilen bilgiler ile kendi çıkarımların/tahminlerin arasına net bir çizgi çek.
-5. Otomatik oluşturulmuş altyazı hatalarını veya anlamsız kelimeleri düzeltmeye çalış, ancak kesin gerçek gibi sunma. Teknik terimleri koru.
-6. JSON ŞEMASINA KESİNLİKLE UY. Markdown \`\`\`json bloğu içinde YALNIZCA geçerli bir JSON döndür. JSON haricinde hiçbir ekstra açıklama, metin veya selamlama yazma.
-7. İstenen dil ayarına kesinlikle uy.
+5. JSON ŞEMASINA KESİNLİKLE UY. Markdown \`\`\`json bloğu içinde YALNIZCA geçerli bir JSON döndür. JSON haricinde metin yazma.
+6. İstenen dil ayarına kesinlikle uy.
 ${langInstructions}
 ${lengthInstructions}
-8. Zaman damgaları (startTimeMs, endTimeMs vb.) milisaniye (ms) cinsinden bir tam sayı (number) olmalıdır. Eğer uygun bir zaman bulunamıyorsa \`null\` kullanın.
-9. "keyIdeas" alanında en fazla 5 ana fikir (veya varsa daha az) bulunmalıdır.`;
+7. Zaman damgaları (startTimeMs, endTimeMs vb.) milisaniye (ms) cinsinden bir tam sayı (number) olmalıdır. Eğer uygun bir zaman bulunamıyorsa \`null\` kullanın.
+8. "keyIdeas" alanında en fazla 5 ana fikir (veya varsa daha az) bulunmalıdır.`;
   }
 
-  static buildUserPrompt(request: SummaryRequest): string {
-    const transcriptText = this.formatTranscript(request);
+  static buildUserPrompt(request: SummaryRequest, type: PromptType = 'single', customContent?: string): string {
+    const content = customContent ? customContent : this.formatTranscript(request);
     
+    let instructions = `Lütfen bu transkripte dayanarak sonucu belirtilen JSON formatında üret.`;
+    if (type === 'chunk') instructions = `Lütfen transkriptin BU PARÇASINA dayanarak ara JSON özetini üret.`;
+    else if (type === 'merge') instructions = `Lütfen bu ARA ÖZETLERİ birleştirerek NİHAİ JSON sonucunu üret.`;
+
     return `Video Bilgileri:
 Başlık: ${request.video.title}
 Kanal: ${request.video.channelName || 'Bilinmiyor'}
 
-Transkript Parçası:
-${transcriptText}
+İçerik:
+${content}
 
-Lütfen bu transkripte dayanarak sonucu belirtilen JSON formatında üret.`;
+${instructions}`;
   }
 
   private static formatTranscript(request: SummaryRequest): string {

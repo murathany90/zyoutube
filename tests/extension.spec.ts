@@ -46,10 +46,10 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
     await popupPage.goto(`chrome-extension://${extensionId}/index.html`);
     
     // Yalnızca ayarlar ve yönetim alanı var. Uzun özet yok.
-    const title = popupPage.locator('h1', { hasText: 'AI Özet & Transkript' });
+    const title = popupPage.locator('h1', { hasText: 'AI Özet Ayarları' });
     await expect(title).toBeVisible();
 
-    const openPanelBtn = popupPage.locator('button', { hasText: 'YouTube Panelini Aç' });
+    const openPanelBtn = popupPage.locator('button', { hasText: "Panel'i Aç" });
     await expect(openPanelBtn).toBeVisible();
 
     await popupPage.close();
@@ -114,7 +114,7 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
     // Popup'tan panel açma tetikleyicisi
     const popupPage = await browserContext.newPage();
     await popupPage.goto(`chrome-extension://${extensionId}/index.html`);
-    const openPanelBtn = popupPage.locator('button', { hasText: 'YouTube Panelini Aç' });
+    const openPanelBtn = popupPage.locator('button', { hasText: "Panel'i Aç" });
     await openPanelBtn.click();
     await popupPage.close();
 

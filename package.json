@@ -8,10 +8,12 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run tests/unit src",
+    "test:providers": "vitest run src/ai/providers",
     "test:fixture": "playwright test tests/e2e.spec.ts",
     "test:extension": "playwright test tests/extension.spec.ts",
-    "test": "npm run typecheck && npm run test:unit && npm run test:fixture && npm run test:extension"
+    "test:privacy": "playwright test tests/privacy/privacy.spec.ts",
+    "test": "npm run typecheck && npm run test:unit && npm run test:providers && npm run test:privacy && npm run test:fixture && npm run test:extension"
   },
   "dependencies": {
     "lucide-react": "^0.368.0",

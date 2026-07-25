@@ -2,6 +2,8 @@ import { AITask, AITaskStatus, SummaryRequest, SummaryResult } from './types';
 import { AIProviderRegistry } from './registry';
 import { AIProviderError } from './errors';
 import { AISettingsService } from '../settings/ai-settings';
+import { TranscriptChunker } from './chunker';
+import { SummaryCache } from './cache';
 
 export class AITaskManager {
   private static tasks: Map<string, AITask> = new Map();
@@ -47,24 +49,78 @@ export class AITaskManager {
         });
       }
 
-      this.updateStatus(task.taskId, 'preparing', onProgress);
+      const providerConfig = settings.providers[providerId];
+      const modelName = providerConfig?.model || 'default';
+      
+      // Cache Kontrolü
+      const cacheResult = await SummaryCache.get(request, providerId, modelName);
+      if (cacheResult) {
+        this.updateStatus(task.taskId, 'completed', onProgress);
+        this.tasks.delete(task.taskId);
+        this.abortControllers.delete(task.taskId);
+        return cacheResult;
+      }
 
-      // (Önizleme: Burada token hesaplama ve chunking mantığı gelecek)
-      // Şimdilik doğrudan sağlayıcıya gönderiyoruz
+      this.updateStatus(task.taskId, 'chunking', onProgress);
+      const chunks = TranscriptChunker.chunkSegments(request.transcript.segments, 3000); // about 12000 chars
+
+      if (chunks.length === 1) {
+        // Single request
+        this.updateStatus(task.taskId, 'summarizing', onProgress);
+        const result = await provider.summarize(request, {
+          signal: controller.signal,
+          onProgress: (msg, prog) => {
+            if (onProgress) onProgress('summarizing', msg, prog);
+          }
+        });
+        await SummaryCache.set(request, providerId, modelName, result);
+        this.updateStatus(task.taskId, 'completed', onProgress);
+        this.tasks.delete(task.taskId);
+        this.abortControllers.delete(task.taskId);
+        return result;
+      }
+
+      // Multi-chunk request
       this.updateStatus(task.taskId, 'summarizing', onProgress);
+      const chunkResults: SummaryResult[] = [];
+      for (let i = 0; i < chunks.length; i++) {
+        if (controller.signal.aborted) throw new Error('AbortError');
+        
+        if (onProgress) onProgress('summarizing', `Bölüm ${i + 1}/${chunks.length} özetleniyor...`, ((i + 1) / chunks.length) * 80);
+        
+        const chunkContent = chunks[i].segments.map(s => `[${s.startTimeMs}] ${s.cleanText || s.text}`).join('\n');
+        
+        const res = await provider.summarize(request, {
+          signal: controller.signal,
+          promptType: 'chunk',
+          customContent: chunkContent
+        });
+        chunkResults.push(res);
+      }
 
-      const result = await provider.summarize(request, {
+      this.updateStatus(task.taskId, 'merging', onProgress);
+      if (onProgress) onProgress('merging', `Ara özetler birleştiriliyor...`, 90);
+      
+      const mergeContent = JSON.stringify(chunkResults.map(r => ({
+        keyIdeas: r.keyIdeas,
+        sections: r.sections,
+        importantTerms: r.importantTerms,
+        warnings: r.warnings
+      })), null, 2);
+
+      const finalResult = await provider.summarize(request, {
         signal: controller.signal,
-        onProgress: (msg, prog) => {
-          if (onProgress) onProgress('summarizing', msg, prog);
-        }
+        promptType: 'merge',
+        customContent: mergeContent
       });
+
+      await SummaryCache.set(request, providerId, modelName, finalResult);
 
       this.updateStatus(task.taskId, 'completed', onProgress);
       this.tasks.delete(task.taskId);
       this.abortControllers.delete(task.taskId);
 
-      return result;
+      return finalResult;
     } catch (e: any) {
       this.tasks.delete(task.taskId);
       this.abortControllers.delete(task.taskId);
