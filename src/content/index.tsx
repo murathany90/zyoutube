@@ -360,8 +360,8 @@ class YouTubeContentController {
     btn.className = 'yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m yt-spec-button-shape-next--icon-leading';
     btn.style.marginLeft = '8px';
     btn.innerHTML = `
-      <div class="yt-spec-button-shape-next__icon">
-        <svg height="24" viewBox="0 0 24 24" width="24" focusable="false" style="pointer-events: none; display: block; width: 100%; height: 100%;">
+      <div class="yt-spec-button-shape-next__icon" aria-hidden="true" style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px;">
+        <svg height="24" viewBox="0 0 24 24" width="24" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;">
           <path d="M12 2L9.19 8.63L2 9.24L7.65 13.97L5.82 21L12 17.27L18.18 21L16.35 13.97L22 9.24L14.81 8.63L12 2Z" fill="currentColor"></path>
         </svg>
       </div>

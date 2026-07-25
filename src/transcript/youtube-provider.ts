@@ -187,35 +187,25 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
 
   async fetchTranscript(videoId: string, track: CaptionTrack, abortController?: AbortController): Promise<TranscriptResult> {
     const fetchUrl = track.baseUrl + (track.baseUrl.includes('?') ? '&fmt=json3' : '?fmt=json3');
-    
-    let rawText = '';
+    let rawText: string;
     try {
-      rawText = await new Promise<string>((resolve, reject) => {
-        if (abortController?.signal.aborted) {
-          return reject(new Error('Aborted'));
-        }
-        
-        const abortHandler = () => reject(new Error('Aborted'));
-        abortController?.signal.addEventListener('abort', abortHandler);
-
-        chrome.runtime.sendMessage(
-          { type: 'FETCH_CAPTION', requestId: Math.random().toString(), url: fetchUrl },
-          (response) => {
-            abortController?.signal.removeEventListener('abort', abortHandler);
-            if (chrome.runtime.lastError) {
-               reject(new Error(chrome.runtime.lastError.message));
-            } else if (response && response.success) {
-               resolve(response.data);
-            } else {
-               reject(new Error(response?.error || 'Unknown fetch error'));
-            }
-          }
-        );
+      const response = await fetch(fetchUrl, {
+         signal: abortController?.signal
       });
+      if (!response.ok) {
+         throw new Error(`HTTP ${response.status}`);
+      }
+      rawText = await response.text();
     } catch (e: any) {
       throw new TranscriptError('CAPTION_FETCH_FAILED', `Altyazı dosyası indirilemedi: ${e.message}`, {
          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: e.message
       });
+    }
+
+    if (!rawText || !rawText.trim()) {
+       throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı sunucudan boş döndü. (Video kısıtlaması veya yetki hatası olabilir)', {
+         expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'EMPTY_BODY'
+       });
     }
 
     let segments = [];

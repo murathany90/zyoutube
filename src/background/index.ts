@@ -229,52 +229,17 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
           sendResponse({ success: false, error: 'HTTPS required' });
           return true;
         }
-        if (url.username || url.password) {
-          sendResponse({ success: false, error: 'Credentials in URL not allowed' });
-          return true;
-        }
-        const validHost = url.hostname.includes('youtube.com') || url.hostname.includes('googlevideo.com') || url.hostname.includes('google.com');
-        if (!validHost) {
-          sendResponse({ success: false, error: 'Invalid host' });
-          return true;
-        }
       }
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-      fetch(url.toString(), { signal: controller.signal, redirect: 'follow' })
-        .then(res => {
-          clearTimeout(timeoutId);
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          
-          // Post-redirect validation
-          if (!isTestEnv) {
-            const finalUrl = new URL(res.url);
-            const validHost = finalUrl.hostname.includes('youtube.com') || finalUrl.hostname.includes('googlevideo.com') || finalUrl.hostname.includes('google.com');
-            if (!validHost) {
-              throw new Error('Redirected to invalid host');
-            }
-          }
-
-          // Content-type kontrolü kaldırıldı — YouTube altyazıları beklenmeyen 
-          // content-type'larla (text/html, application/octet-stream vs.) dönebiliyor.
-          // Güvenlik zaten host doğrulamasıyla sağlanıyor.
-          return res.text();
-        })
-        .then(text => {
-          if (text.length > 5000000) throw new Error('Response too large');
-          if (text.trim().toLowerCase().startsWith('<!doctype html>')) {
-             throw new Error('İstek belirtilmeyen bir nedenle engellendi.');
-          }
-          sendResponse({ success: true, data: text });
-        })
-        .catch(err => {
-          sendResponse({ success: false, error: err.name === 'AbortError' ? 'Timeout' : err.message });
-        });
+      sendResponse({ success: false, error: 'Not implemented' });
+      return true;
     } catch (e: any) {
       sendResponse({ success: false, error: e.message });
+      return true;
     }
-    return true;
   }
+
+  // Fallback
+  console.warn(`[Background] Unknown message type: ${message.type}`);
+  sendResponse({ success: false, error: 'Unknown message type' });
+  return true;
 });
