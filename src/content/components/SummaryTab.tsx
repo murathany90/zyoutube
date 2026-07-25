@@ -3,6 +3,7 @@ import { SummaryResult, AITaskStatus, SummaryRequest } from '../../ai/types';
 import { YouTubeTranscriptProvider } from '../../transcript/youtube-provider';
 import { AISettingsService } from '../../settings/ai-settings';
 import { SummaryEngine } from '../../gem/types';
+import { sendRuntimeMessage } from '../runtime-messenger';
 
 export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: string; url: string }) => {
   const [status, setStatus] = useState<AITaskStatus>('queued');
@@ -32,7 +33,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
     setError(null);
     setIsProcessing(false);
     if (taskId) {
-      chrome.runtime.sendMessage({ type: 'CANCEL_SUMMARY', taskId });
+      sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId }).catch(() => {});
       setTaskId(null);
     }
   }, [videoId]);
@@ -100,10 +101,10 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
       setTaskId(request.taskId);
       setProgressMessage(selectedEngine === 'gemini-gem' ? 'Gemini Gem başlatılıyor...' : 'AI Sağlayıcı aranıyor...');
 
-      chrome.runtime.sendMessage({
+      sendRuntimeMessage({
         type: 'START_SUMMARY',
         request,
-      });
+      }).catch(() => {});
     } catch (e: any) {
       let msg = e.message || 'Transkript çekilemedi.';
       if (e.diagnostics) {
@@ -117,7 +118,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
 
   const cancelSummary = () => {
     if (taskId) {
-      chrome.runtime.sendMessage({ type: 'CANCEL_SUMMARY', taskId });
+      sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId }).catch(() => {});
       setIsProcessing(false);
       setStatus('cancelled');
       setProgressMessage('İptal edildi.');

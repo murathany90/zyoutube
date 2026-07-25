@@ -5,6 +5,7 @@ import { TranscriptTab } from './TranscriptTab';
 import { SummaryTab } from './components/SummaryTab';
 import { GemSettingsService } from '../gem/settings';
 import { PanelSettings } from '../gem/types';
+import { sendRuntimeMessage, RuntimeMessengerError } from './runtime-messenger';
 
 // ============================================================================
 // COMPONENT: EXTENSION INVALIDATED
@@ -254,26 +255,22 @@ class YouTubeContentController {
 
   private async pingBackground(): Promise<boolean> {
     if (this.isInvalidated) return false;
-    return new Promise((resolve) => {
-      try {
-        if (!chrome?.runtime?.sendMessage) throw new Error('No runtime');
-        chrome.runtime.sendMessage({ type: 'PING_BACKGROUND' }, (response) => {
-          if (chrome.runtime.lastError) {
-            if (chrome.runtime.lastError.message?.includes('invalidated')) {
-              this.handleContextInvalidated();
-            }
-            resolve(false);
-          } else {
-            resolve(response?.success === true);
-          }
-        });
-      } catch (e: any) {
-        if (e.message?.includes('invalidated') || e.message?.includes('Extension context')) {
+    try {
+      const response = await sendRuntimeMessage<{ type: 'PING_BACKGROUND' }, { success: boolean }>(
+        { type: 'PING_BACKGROUND' },
+        { timeoutMs: 3000 }
+      );
+      return response?.success === true;
+    } catch (e: any) {
+      if (e instanceof RuntimeMessengerError) {
+        if (e.code === 'EXTENSION_CONTEXT_INVALIDATED') {
           this.handleContextInvalidated();
         }
-        resolve(false);
+      } else if (e.message?.includes('invalidated') || e.message?.includes('Extension context')) {
+        this.handleContextInvalidated();
       }
-    });
+      return false;
+    }
   }
 
   private mountPanel(videoId: string): boolean {
