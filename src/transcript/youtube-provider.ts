@@ -1,4 +1,5 @@
-import { ITranscriptProvider, CaptionTrack, TranscriptResult } from './types';
+import { ITranscriptProvider, CaptionTrack, TranscriptResult, TranscriptError } from './types';
+import { parseTranscript } from './parser';
 import { evaluateQuality } from './quality';
 import { getPlayerResponseFromMainWorld } from '../content/bridge';
 
@@ -146,7 +147,6 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
     }
     
     if (!playerResponse || playerResponse.error) {
-       const { TranscriptError } = await import('./types');
        const errorMessage = playerResponse?.error?.includes('Eklenti güncellendi') 
            ? playerResponse.error 
            : 'YouTube oynatıcı henüz hazır değil veya veri alınamadı.';
@@ -157,14 +157,12 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
     }
 
     if (playerResponse.videoId !== videoId) {
-       const { TranscriptError } = await import('./types');
        throw new TranscriptError('PLAYER_RESPONSE_VIDEO_MISMATCH', 'Oynatıcıdaki video ile istenen video eşleşmiyor.', diagnostics || undefined);
     }
 
     const tracks = playerResponse.captionTracks || [];
     
     if (tracks.length === 0) {
-      const { TranscriptError } = await import('./types');
       throw new TranscriptError('CAPTION_TRACKS_EMPTY', 'Bu videoda erişilebilir bir altyazı bulunamadı.', diagnostics || undefined);
     }
     
@@ -215,7 +213,6 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
         );
       });
     } catch (e: any) {
-      const { TranscriptError } = await import('./types');
       throw new TranscriptError('CAPTION_FETCH_FAILED', `Altyazı dosyası indirilemedi: ${e.message}`, {
          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: e.message
       });
@@ -223,10 +220,8 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
 
     let segments = [];
     try {
-       const { parseTranscript } = await import('./parser');
        segments = parseTranscript(rawText, track.languageCode);
     } catch (e: any) {
-       const { TranscriptError } = await import('./types');
        throw new TranscriptError('CAPTION_PARSE_FAILED', 'Altyazı verisi çözümlenemedi veya bozuk.', {
          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: e.message
        });
