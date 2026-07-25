@@ -127,33 +127,53 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
     return null;
   }
 
+  private readonly RETRY_DELAYS = [0, 300, 700, 1200, 2000]; // Bounded backoff ~4.2s total
+
+  private shouldRetry(error: any): boolean {
+    if (!error) return true;
+    const msg = error.message || '';
+    // Never retry these conditions
+    if (msg.includes('Eklenti güncellendi') || msg.includes('invalidated')) return false;
+    if (error instanceof RuntimeMessengerError) {
+      if (['EXTENSION_CONTEXT_INVALIDATED', 'BACKGROUND_UNAVAILABLE', 'BACKGROUND_TIMEOUT', 'REQUEST_CANCELLED'].includes(error.code)) return false;
+    }
+    return true;
+  }
+
   async getAvailableTracks(videoId: string): Promise<CaptionTrack[]> {
     let playerResponse = null;
     let diagnostics = null;
-    const maxRetries = 10;
     
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      playerResponse = await this.getPlayerResponse(videoId);
+    for (let attempt = 0; attempt <= this.RETRY_DELAYS.length; attempt++) {
+      if (attempt > 0) {
+        const delay = attempt <= this.RETRY_DELAYS.length ? this.RETRY_DELAYS[attempt - 1] : 2000;
+        await new Promise(r => setTimeout(r, delay));
+      }
+
+      try {
+        playerResponse = await this.getPlayerResponse(videoId);
+      } catch (e: any) {
+        if (!this.shouldRetry(e)) throw e;
+        diagnostics = { expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: false, captionsObjectFound: false, trackCount: 0, trackLanguages: [], retryCount: attempt, errorCode: e.code || e.message };
+        continue;
+      }
       
       if (playerResponse?.diagnostics) {
         diagnostics = { ...playerResponse.diagnostics, retryCount: attempt };
       }
 
       if (playerResponse && !playerResponse.error && playerResponse.videoId === videoId) {
-        break; // Success
+        break;
       }
-      
-      // If we failed, let's wait 500ms and try again (YouTube SPA might be lazy loading)
-      await new Promise(r => setTimeout(r, 500));
+
+      if (playerResponse?.error?.includes('Eklenti güncellendi') || playerResponse?.error?.includes('invalidated')) {
+        throw new TranscriptError('EXTENSION_CONTEXT_INVALIDATED', playerResponse.error, diagnostics || undefined);
+      }
     }
     
     if (!playerResponse || playerResponse.error) {
-       const errorMessage = playerResponse?.error?.includes('Eklenti güncellendi') 
-           ? playerResponse.error 
-           : 'YouTube oynatıcı henüz hazır değil veya veri alınamadı.';
-       
-       throw new TranscriptError('PLAYER_RESPONSE_NOT_READY', errorMessage, diagnostics || {
-         expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: false, captionsObjectFound: false, trackCount: 0, trackLanguages: [], retryCount: maxRetries
+       throw new TranscriptError('PLAYER_RESPONSE_NOT_READY', 'YouTube oynatıcı henüz hazır değil veya veri alınamadı.', diagnostics || {
+         expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: false, captionsObjectFound: false, trackCount: 0, trackLanguages: [], retryCount: this.RETRY_DELAYS.length
        });
     }
 

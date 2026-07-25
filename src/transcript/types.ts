@@ -14,7 +14,11 @@ export type TranscriptErrorCode =
   | 'PLAYER_RESPONSE_VIDEO_MISMATCH'
   | 'CAPTION_TRACKS_EMPTY'
   | 'CAPTION_FETCH_FAILED'
-  | 'CAPTION_PARSE_FAILED';
+  | 'CAPTION_PARSE_FAILED'
+  | 'CAPTION_URL_REJECTED'
+  | 'CAPTION_RESPONSE_HTML'
+  | 'CAPTION_FETCH_TIMEOUT'
+  | 'EXTENSION_CONTEXT_INVALIDATED';
 
 export class TranscriptError extends Error {
   constructor(public code: TranscriptErrorCode, message: string, public diagnostics?: TranscriptDiagnostics) {
