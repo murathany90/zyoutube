@@ -147,7 +147,11 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
     
     if (!playerResponse || playerResponse.error) {
        const { TranscriptError } = await import('./types');
-       throw new TranscriptError('PLAYER_RESPONSE_NOT_READY', 'YouTube oynatıcı henüz hazır değil veya veri alınamadı.', diagnostics || {
+       const errorMessage = playerResponse?.error?.includes('Eklenti güncellendi') 
+           ? playerResponse.error 
+           : 'YouTube oynatıcı henüz hazır değil veya veri alınamadı.';
+       
+       throw new TranscriptError('PLAYER_RESPONSE_NOT_READY', errorMessage, diagnostics || {
          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: false, captionsObjectFound: false, trackCount: 0, trackLanguages: [], retryCount: maxRetries
        });
     }
