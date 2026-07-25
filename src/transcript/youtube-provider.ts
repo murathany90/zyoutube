@@ -220,9 +220,14 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
 
     let segments = [];
     try {
+       console.log('ZYouTube [Transcript] rawText length:', rawText?.length);
+       if (rawText?.length < 500) console.log('ZYouTube [Transcript] rawText content (short):', rawText);
        segments = parseTranscript(rawText, track.languageCode);
+       console.log('ZYouTube [Transcript] successfully parsed segments count:', segments.length);
     } catch (e: any) {
-       throw new TranscriptError('CAPTION_PARSE_FAILED', 'Altyazı verisi çözümlenemedi veya bozuk.', {
+       console.error('ZYouTube [Transcript] PARSE ERROR:', e.message, e.stack);
+       console.error('ZYouTube [Transcript] RAW TEXT DUMP:', rawText ? String(rawText).substring(0, 1000) : 'null/undefined');
+       throw new TranscriptError('CAPTION_PARSE_FAILED', 'Altyazı verisi çözümlenemedi veya bozuk. Lütfen konsola bakın.', {
          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: e.message
        });
     }
