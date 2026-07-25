@@ -63,11 +63,56 @@ test.describe('Privacy and Security Validation', () => {
     // Check it's saved by waiting for success message
     await expect(page.locator('text=Kaydedildi')).toBeVisible();
 
-    // 2. Open YouTube page (or our fixture)
-    await page.goto('http://localhost:3000/?v=dQw4w9WgXcQ'); // Assuming we have server.js running
+    // 2. Open YouTube page via route interception
+    const fixtureHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head><title>YouTube</title></head>
+        <body>
+          <div id="secondary"><div id="secondary-inner"></div></div>
+          <div id="above-the-fold">
+            <div id="top-level-buttons-computed" style="display:flex;"></div>
+          </div>
+          <script>
+            window.ytInitialPlayerResponse = {
+              videoDetails: { videoId: 'dQw4w9WgXcQ', lengthSeconds: '212' },
+              captions: {
+                playerCaptionsTracklistRenderer: {
+                  captionTracks: [
+                    { baseUrl: 'https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ', languageCode: 'en', name: { simpleText: 'English' }, kind: 'asr', isTranslatable: true }
+                  ]
+                }
+              }
+            };
+          </script>
+        </body>
+      </html>
+    `;
+
+    await page.route('https://www.youtube.com/watch?v=dQw4w9WgXcQ', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: fixtureHtml
+      });
+    });
+
+    await page.route('https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          events: [
+            { tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: 'test transcript content' }] }
+          ]
+        })
+      });
+    });
+
+    await page.goto('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
 
     // Trigger Summary
-    const summaryBtn = page.locator('#ai-summary-btn');
+    const summaryBtn = page.locator('#zyoutube-toggle-button');
     await summaryBtn.waitFor({ state: 'visible', timeout: 5000 });
     
     // Open the panel if not open

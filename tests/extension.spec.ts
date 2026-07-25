@@ -106,7 +106,7 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
     await page.goto('https://www.youtube.com/watch?v=fixtureVideoId');
 
     // Buton enjekte edildi mi?
-    const button = page.locator('#ai-summary-btn');
+    const button = page.locator('#zyoutube-toggle-button');
     await expect(button).toBeVisible({ timeout: 5000 });
     
     // Panel otomatik açılmış olmalı (varsayılan ayar) veya butona basarak açılır

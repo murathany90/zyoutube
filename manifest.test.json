@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "ZYouTube — AI Özet",
-  "version": "1.1.0",
-  "description": "YouTube videoları için Gemini Gem ve AI destekli özetleme eklentisi.",
+  "name": "ZYouTube — AI Özet (Test)",
+  "version": "1.1.0-test",
+  "description": "YouTube videoları için Gemini Gem ve AI destekli özetleme eklentisi (test build).",
   "permissions": [
     "storage",
     "tabs",
@@ -27,7 +27,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://*.youtube.com/*"
+        "https://*.youtube.com/*",
+        "http://localhost:3000/*"
       ],
       "js": ["src/content/index.tsx"]
     },

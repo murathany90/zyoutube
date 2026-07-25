@@ -374,21 +374,20 @@ class YouTubeContentController {
     const actionsRow = document.querySelector('#top-level-buttons-computed') || document.querySelector('ytd-menu-renderer #top-level-buttons') || document.querySelector('#actions-inner');
     if (!actionsRow) return false;
 
-    if (document.getElementById('ai-summary-btn')) return true;
+    if (document.getElementById('zyoutube-toggle-button')) return true;
 
     const btn = document.createElement('button');
-    btn.id = 'ai-summary-btn';
+    btn.id = 'zyoutube-toggle-button';
+    btn.className = 'zyoutube-toggle-button';
     btn.setAttribute('data-zyoutube-owner', 'extension');
     btn.setAttribute('data-zyoutube-build', BUILD_ID);
-    btn.className = 'yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m yt-spec-button-shape-next--icon-leading';
-    btn.style.marginLeft = '8px';
     btn.innerHTML = `
-      <div class="yt-spec-button-shape-next__icon">
+      <span class="zyoutube-toggle-icon">
         <svg height="24" viewBox="0 0 24 24" width="24" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;">
           <path d="M12 2L9.19 8.63L2 9.24L7.65 13.97L5.82 21L12 17.27L18.18 21L16.35 13.97L22 9.24L14.81 8.63L12 2Z" fill="currentColor"></path>
         </svg>
-      </div>
-      <div class="yt-spec-button-shape-next__button-text-content">AI Özet</div>
+      </span>
+      <span class="zyoutube-toggle-label">AI Özet</span>
     `;
 
     btn.addEventListener('click', () => {
@@ -416,6 +415,55 @@ class YouTubeContentController {
       this.updateButtonState();
     });
 
+    // Inject scoped button styles (only if not already present)
+    if (!document.getElementById('zyoutube-toggle-styles')) {
+      const styleEl = document.createElement('style');
+      styleEl.id = 'zyoutube-toggle-styles';
+      styleEl.textContent = `
+        .zyoutube-toggle-button {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          margin-left: 8px;
+          padding: 0 12px;
+          height: 36px;
+          border: none;
+          border-radius: 18px;
+          background: #f2f2f2;
+          color: #0f0f0f;
+          font-family: 'YouTube Sans', Roboto, Arial, sans-serif;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: background 0.15s, opacity 0.15s;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+        .zyoutube-toggle-button:hover {
+          background: #d9d9d9;
+        }
+        .zyoutube-toggle-button:active {
+          background: #c7c7c7;
+        }
+        .zyoutube-toggle-button[disabled] {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        .zyoutube-toggle-icon {
+          display: inline-flex;
+          align-items: center;
+          width: 24px;
+          height: 24px;
+          flex-shrink: 0;
+        }
+        .zyoutube-toggle-label {
+          display: inline-flex;
+          align-items: center;
+        }
+      `;
+      document.head.appendChild(styleEl);
+    }
+
     if (actionsRow.firstChild) {
       actionsRow.insertBefore(btn, actionsRow.firstChild);
     } else {
@@ -425,9 +473,9 @@ class YouTubeContentController {
   }
 
   private updateButtonState() {
-    const btn = document.getElementById('ai-summary-btn');
+    const btn = document.getElementById('zyoutube-toggle-button');
     if (!btn) return;
-    const textEl = btn.querySelector('.yt-spec-button-shape-next__button-text-content');
+    const textEl = btn.querySelector('.zyoutube-toggle-label');
     if (!textEl) return;
 
     const hasPanel = !!document.getElementById('zyoutube-panel-host');
@@ -484,9 +532,9 @@ class YouTubeContentController {
 
       if (!panelSettings.enabled) {
         this.unmountPanel();
-        const btn = document.getElementById('ai-summary-btn');
+        const btn = document.getElementById('zyoutube-toggle-button');
         if (btn) {
-          const textEl = btn.querySelector('.yt-spec-button-shape-next__button-text-content');
+          const textEl = btn.querySelector('.zyoutube-toggle-label');
           if (textEl) textEl.textContent = 'Pasif';
           btn.setAttribute('disabled', 'true');
           btn.style.opacity = '0.5';
@@ -597,8 +645,10 @@ class YouTubeContentController {
     }
 
     this.unmountPanel();
-    const btn = document.getElementById('ai-summary-btn');
+    const btn = document.getElementById('zyoutube-toggle-button');
     if (btn) btn.remove();
+    const styleEl = document.getElementById('zyoutube-toggle-styles');
+    if (styleEl) styleEl.remove();
   }
 }
 

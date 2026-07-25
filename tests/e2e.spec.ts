@@ -29,10 +29,57 @@ test.describe('YouTube AI Summary Extension e2e (Fixture based)', () => {
     page = await browserContext.newPage();
     page.on('console', msg => console.log('PAGE LOG:', msg.text()));
     page.on('pageerror', err => console.log('PAGE ERROR:', err.message));
-    await page.goto('http://localhost:3000/?v=dQw4w9WgXcQ');
+    
+    const fixtureHtml = `
+      <!DOCTYPE html>
+      <html>
+        <head><title>YouTube</title></head>
+        <body>
+          <div id="secondary"><div id="secondary-inner"></div></div>
+          <div id="above-the-fold">
+            <div id="top-level-buttons-computed" style="display:flex;"></div>
+          </div>
+          <script>
+            window.ytInitialPlayerResponse = {
+              videoDetails: { videoId: 'dQw4w9WgXcQ', lengthSeconds: '212' },
+              captions: {
+                playerCaptionsTracklistRenderer: {
+                  captionTracks: [
+                    { baseUrl: 'https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ', languageCode: 'en', name: { simpleText: 'English' }, kind: 'asr', isTranslatable: true }
+                  ]
+                }
+              }
+            };
+          </script>
+        </body>
+      </html>
+    `;
+
+    await page.route('https://www.youtube.com/watch?v=dQw4w9WgXcQ', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: fixtureHtml
+      });
+    });
+
+    await page.route('https://www.youtube.com/api/timedtext?v=dQw4w9WgXcQ*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          events: [
+            { tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: 'hello this is a test' }] },
+            { tStartMs: 1000, dDurationMs: 1000, segs: [{ utf8: 'hello test second segment' }] }
+          ]
+        })
+      });
+    });
+
+    await page.goto('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
     
     // Check if the button is injected
-    const button = page.locator('#ai-summary-btn');
+    const button = page.locator('#zyoutube-toggle-button');
     try {
       await expect(button).toBeVisible({ timeout: 5000 });
     } catch (e) {
