@@ -1,0 +1,36 @@
+{
+  "name": "youtube-ai-summary-extension",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "test:fixture": "playwright test tests/e2e.spec.ts",
+    "test:extension": "playwright test tests/extension.spec.ts",
+    "test": "npm run typecheck && npm run test:unit && npm run test:fixture && npm run test:extension"
+  },
+  "dependencies": {
+    "lucide-react": "^0.368.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.0-beta.23",
+    "@playwright/test": "^1.62.0",
+    "@types/chrome": "^0.0.263",
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.19",
+    "jsdom": "^29.1.1",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.3",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0",
+    "vitest": "^4.1.10"
+  }
+}

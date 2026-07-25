@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Transkript & AI Özet",
+  "version": "1.0.0",
+  "description": "YouTube videoları için transkript çıkarma ve AI destekli özetleme eklentisi.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting",
+    "activeTab",
+    "downloads",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "https://*.youtube.com/*",
+    "https://gemini.google.com/*",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_popup": "index.html"
+  },
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.youtube.com/*",
+        "http://localhost:3000/*"
+      ],
+      "js": ["src/content/index.tsx"]
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <title>YouTube Fixture</title>
+  <script>
+    // Mock ytInitialPlayerResponse
+    var ytInitialPlayerResponse = {
+      "videoDetails": {
+        "videoId": "dQw4w9WgXcQ",
+        "lengthSeconds": "212"
+      },
+      "captions": {
+        "playerCaptionsTracklistRenderer": {
+          "captionTracks": [
+            {
+              "baseUrl": "http://localhost:3000/mock-transcript.xml",
+              "name": { "simpleText": "İngilizce (Otomatik)" },
+              "vssId": "a.en",
+              "languageCode": "en",
+              "kind": "asr",
+              "isTranslatable": true
+            }
+          ]
+        }
+      }
+    };
+  </script>
+</head>
+<body>
+  <div id="above-the-fold">
+    <div id="top-level-buttons-computed" style="min-height: 40px; min-width: 100px; display: flex;">
+      <!-- Buttons row -->
+    </div>
+    <!-- Extension will inject panel here -->
+  </div>
+  <!-- Mock Video Element -->
+  <video style="width: 300px; height: 150px;" controls></video>
+</body>
+</html>
