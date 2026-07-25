@@ -160,19 +160,23 @@ class YouTubeContentController {
   private panelHiddenForTab: boolean = false;
   private isInvalidated: boolean = false;
   private observer: MutationObserver | null = null;
+  private bootstrapObserver: MutationObserver | null = null;
   private storageListener: ((changes: any, areaName: string) => void) | null = null;
   private messageListener: ((message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => void) | null = null;
-  
-  private intervals = new Set<number>();
-  private timeouts = new Set<number>();
-  
-  private injectDebounceTimer: number | null = null;
+
+  // Navigation-scoped resources (cleared on SPA navigation)
+  private navIntervals = new Set<number>();
+  private navTimeouts = new Set<number>();
+
+  // Persistent resources (kept across navigation)
+  private persistentTimeouts = new Set<number>();
+
+
 
   constructor() {
     this.cleanupOldInstances();
   }
 
-  // Eski sürümlerden kalma DOM parçalarını temizle
   private cleanupOldInstances() {
     document.querySelectorAll('[data-zyoutube-owner="extension"]').forEach(el => {
       if (el.getAttribute('data-zyoutube-build') !== BUILD_ID) {
@@ -181,15 +185,15 @@ class YouTubeContentController {
     });
   }
 
-  private setIntervalSafe(handler: TimerHandler, timeout?: number): number {
+  private setNavInterval(handler: TimerHandler, timeout?: number): number {
     const id = window.setInterval(handler, timeout);
-    this.intervals.add(id);
+    this.navIntervals.add(id);
     return id;
   }
 
-  private clearIntervalSafe(id: number) {
+  private clearNavInterval(id: number) {
     window.clearInterval(id);
-    this.intervals.delete(id);
+    this.navIntervals.delete(id);
   }
 
   private getVideoId(): string | null {
@@ -225,7 +229,6 @@ class YouTubeContentController {
       container.style.setProperty('--zy-text', isDark ? '#e5e7eb' : '#111827');
       container.style.setProperty('--zy-text-muted', isDark ? '#9ca3af' : '#4b5563');
       container.style.setProperty('--zy-border', isDark ? '#3f3f46' : '#e5e7eb');
-      
       container.style.setProperty('--zy-item-bg', isDark ? '#3f3f46' : '#f3f4f6');
       container.style.setProperty('--zy-item-hover', isDark ? '#52525b' : '#e5e7eb');
       container.style.setProperty('--zy-error-bg', isDark ? '#7f1d1d' : '#fef2f2');
@@ -238,19 +241,44 @@ class YouTubeContentController {
   public handleContextInvalidated() {
     if (this.isInvalidated) return;
     this.isInvalidated = true;
-    
-    // Stop all active logic
-    this.intervals.forEach(id => window.clearInterval(id));
-    this.timeouts.forEach(id => window.clearTimeout(id));
-    this.intervals.clear();
-    this.timeouts.clear();
-    
+    this.navIntervals.forEach(id => window.clearInterval(id));
+    this.navTimeouts.forEach(id => window.clearTimeout(id));
+    this.navIntervals.clear();
+    this.navTimeouts.clear();
+    this.persistentTimeouts.forEach(id => window.clearTimeout(id));
+    this.persistentTimeouts.clear();
+    if (this.bootstrapObserver) {
+      this.bootstrapObserver.disconnect();
+      this.bootstrapObserver = null;
+    }
     if (this.observer) {
       this.observer.disconnect();
       this.observer = null;
     }
-    
-    this.renderPanel(this.currentVideoId); // Show invalidated UI
+    this.renderPanel(this.currentVideoId);
+  }
+
+  // Clean up navigation-scoped resources only (intervals, timeouts, bootstrap observer)
+  private clearNavigationResources() {
+    this.navIntervals.forEach(id => window.clearInterval(id));
+    this.navTimeouts.forEach(id => window.clearTimeout(id));
+    this.navIntervals.clear();
+    this.navTimeouts.clear();
+    if (this.bootstrapObserver) {
+      this.bootstrapObserver.disconnect();
+      this.bootstrapObserver = null;
+    }
+  }
+
+  // Full reset for SPA navigation: keeps persistent listeners, resets video state
+  private resetForNavigation(newVideoId: string) {
+    this.clearNavigationResources();
+    this.currentVideoId = newVideoId;
+
+    // Update existing panel host content if it exists, or it will be created by init()
+    if (document.getElementById('zyoutube-panel-host')) {
+      this.renderPanel(newVideoId);
+    }
   }
 
   private async pingBackground(): Promise<boolean> {
@@ -292,10 +320,9 @@ class YouTubeContentController {
     host.id = 'zyoutube-panel-host';
     host.setAttribute('data-zyoutube-owner', 'extension');
     host.setAttribute('data-zyoutube-build', BUILD_ID);
-    
+
     const shadowRoot = host.attachShadow({ mode: 'open' });
-    
-    // Inject scoped CSS
+
     const style = document.createElement('style');
     style.textContent = panelCss;
     shadowRoot.appendChild(style);
@@ -353,7 +380,6 @@ class YouTubeContentController {
     btn.id = 'ai-summary-btn';
     btn.setAttribute('data-zyoutube-owner', 'extension');
     btn.setAttribute('data-zyoutube-build', BUILD_ID);
-    // Minimal classes to match youtube style without bringing tailwind issues
     btn.className = 'yt-spec-button-shape-next yt-spec-button-shape-next--tonal yt-spec-button-shape-next--mono yt-spec-button-shape-next--size-m yt-spec-button-shape-next--icon-leading';
     btn.style.marginLeft = '8px';
     btn.innerHTML = `
@@ -374,10 +400,8 @@ class YouTubeContentController {
       if (this.panelHiddenForTab) {
         this.panelHiddenForTab = false;
         const vid = this.getVideoId();
-        console.log('ZYouTube: videoId:', vid);
         if (vid) {
-           const mounted = this.mountPanel(vid);
-           console.log('ZYouTube: mountPanel result:', mounted);
+          this.mountPanel(vid);
         }
       } else if (document.getElementById('zyoutube-panel-host')) {
         this.panelHiddenForTab = true;
@@ -385,10 +409,8 @@ class YouTubeContentController {
       } else {
         this.panelHiddenForTab = false;
         const vid = this.getVideoId();
-        console.log('ZYouTube: videoId (else):', vid);
         if (vid) {
-           const mounted = this.mountPanel(vid);
-           console.log('ZYouTube: mountPanel result (else):', mounted);
+          this.mountPanel(vid);
         }
       }
       this.updateButtonState();
@@ -415,11 +437,44 @@ class YouTubeContentController {
     }
   }
 
+  private setupBootstrapObserver() {
+    if (this.bootstrapObserver) return;
+
+    const maxWaitMs = 8000;
+
+    this.bootstrapObserver = new MutationObserver(() => {
+      const secondaryFound = !!document.querySelector('#secondary') || !!document.querySelector('#secondary-inner');
+      const buttonRowFound = !!document.querySelector('#top-level-buttons-computed');
+
+      if (secondaryFound && buttonRowFound) {
+        this.bootstrapObserver?.disconnect();
+        this.bootstrapObserver = null;
+        this.init();
+      }
+    });
+
+    this.bootstrapObserver.observe(document.body, { childList: true, subtree: true });
+
+    const timeoutId = window.setTimeout(() => {
+      if (this.bootstrapObserver) {
+        this.bootstrapObserver.disconnect();
+        this.bootstrapObserver = null;
+        this.init();
+      }
+    }, maxWaitMs);
+    this.persistentTimeouts.add(timeoutId);
+  }
+
   public async init() {
     if (this.isInvalidated) return;
-    
+
     const videoId = this.getVideoId();
     if (!videoId) return;
+
+    // If video changed, reset navigation-scoped resources
+    if (videoId !== this.currentVideoId && this.currentVideoId !== '') {
+      this.resetForNavigation(videoId);
+    }
 
     try {
       const pingOk = await this.pingBackground();
@@ -439,21 +494,23 @@ class YouTubeContentController {
         return;
       }
 
-      let retries = 0;
-      const interval = this.setIntervalSafe(() => {
-        if (this.injectButton() || retries > 10) {
-          this.clearIntervalSafe(interval);
+      // Inject button with bounded retry
+      let buttonRetries = 0;
+      const btnInterval = this.setNavInterval(() => {
+        if (this.injectButton() || buttonRetries > 10) {
+          this.clearNavInterval(btnInterval);
           this.updateButtonState();
         }
-        retries++;
+        buttonRetries++;
       }, 1000);
 
+      // Mount panel if auto-open is enabled
       if (panelSettings.autoOpenOnWatchPage && !this.panelHiddenForTab) {
-        if (videoId !== this.currentVideoId || !document.getElementById('zyoutube-panel-host')) {
+        if (!document.getElementById('zyoutube-panel-host')) {
           let mountRetries = 0;
-          const mountInterval = this.setIntervalSafe(() => {
-            if (this.mountPanel(videoId) || mountRetries > 15) {
-              this.clearIntervalSafe(mountInterval);
+          const mountInterval = this.setNavInterval(() => {
+            if (this.mountPanel(videoId) || mountRetries > 10) {
+              this.clearNavInterval(mountInterval);
               this.updateButtonState();
             }
             mountRetries++;
@@ -467,6 +524,7 @@ class YouTubeContentController {
 
   public start() {
     this.init();
+    this.setupBootstrapObserver();
 
     this.messageListener = (message, _sender, sendResponse) => {
       if (message.type === 'YOUTUBE_URL_CHANGED') {
@@ -497,59 +555,35 @@ class YouTubeContentController {
       chrome.storage.onChanged.addListener(this.storageListener);
     }
 
-    this.observer = new MutationObserver((mutations) => {
-      if (this.isInvalidated) return;
-      
-      let relevantMutation = false;
-      for (const mutation of mutations) {
-        if (mutation.target instanceof Element) {
-          const id = mutation.target.id;
-          const tag = mutation.target.tagName.toLowerCase();
-          if (id === 'secondary' || id === 'secondary-inner' || id === 'top-level-buttons-computed' || tag === 'ytd-watch-flexy') {
-            relevantMutation = true;
-            break;
+    // Persistent observer for secondary re-attach (only after bootstrap done)
+    this.persistentTimeouts.add(window.setTimeout(() => {
+      const secondaryTarget = document.querySelector('#secondary');
+      if (!secondaryTarget) {
+        this.observer = new MutationObserver(() => {
+          const sec = document.querySelector('#secondary');
+          if (sec && !document.getElementById('zyoutube-panel-host')) {
+            const vid = this.getVideoId();
+            if (vid) this.mountPanel(vid);
           }
-        }
+        });
+        this.observer.observe(document.body, { childList: true, subtree: true });
       }
-
-      if (!relevantMutation) return;
-
-      if (this.injectDebounceTimer) {
-        window.clearTimeout(this.injectDebounceTimer);
-      }
-      
-      this.injectDebounceTimer = window.setTimeout(() => {
-        if (window.location.href.includes('youtube.com/watch') || window.location.href.includes('localhost:3000')) {
-          const videoId = this.getVideoId();
-          if (videoId && videoId !== this.currentVideoId) {
-            this.panelHiddenForTab = false;
-            this.init();
-          } else if (videoId) {
-            this.injectButton();
-            this.updateButtonState();
-            if (!this.panelHiddenForTab && !document.getElementById('zyoutube-panel-host')) {
-              GemSettingsService.getPanelSettings().then(ps => {
-                if (ps.enabled && ps.autoOpenOnWatchPage) {
-                  this.mountPanel(videoId);
-                }
-              }).catch(() => {});
-            }
-            const reactRoot = document.getElementById('zyoutube-react-root');
-            if (reactRoot) this.applyTheme(reactRoot);
-          }
-        }
-      }, 250); // Debounce
-    });
-
-    this.observer.observe(document.body, { childList: true, subtree: true });
+    }, 10000));
   }
 
   public destroy() {
-    this.intervals.forEach(id => window.clearInterval(id));
-    this.timeouts.forEach(id => window.clearTimeout(id));
-    this.intervals.clear();
-    this.timeouts.clear();
+    this.navIntervals.forEach(id => window.clearInterval(id));
+    this.navTimeouts.forEach(id => window.clearTimeout(id));
+    this.navIntervals.clear();
+    this.navTimeouts.clear();
 
+    this.persistentTimeouts.forEach(id => window.clearTimeout(id));
+    this.persistentTimeouts.clear();
+
+    if (this.bootstrapObserver) {
+      this.bootstrapObserver.disconnect();
+      this.bootstrapObserver = null;
+    }
     if (this.observer) {
       this.observer.disconnect();
       this.observer = null;
