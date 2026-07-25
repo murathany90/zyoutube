@@ -28,15 +28,25 @@ test.describe('YouTube AI Summary Extension e2e (Fixture based)', () => {
   test('should render TranscriptTab correctly with fixture data', async () => {
     page = await browserContext.newPage();
     page.on('console', msg => console.log('PAGE LOG:', msg.text()));
+    page.on('pageerror', err => console.log('PAGE ERROR:', err.message));
     await page.goto('http://localhost:3000/?v=dQw4w9WgXcQ');
     
     // Check if the button is injected
     const button = page.locator('#ai-summary-btn');
-    await expect(button).toBeVisible({ timeout: 5000 });
+    try {
+      await expect(button).toBeVisible({ timeout: 5000 });
+    } catch (e) {
+      console.log("Button not found. HTML Dump:", await page.innerHTML('body'));
+      throw e;
+    }
     
-    // Open the panel
-    await button.click();
-    
+    // Open the panel if not open
+    const panel = page.locator('#zyoutube-panel-container');
+    const isPanelVisible = await panel.isVisible();
+    if (!isPanelVisible) {
+      await button.click();
+      await expect(panel).toBeVisible();
+    }
     // Switch to Transcript tab
     const transcriptTabBtn = page.getByRole('button', { name: 'Transkript' });
     await expect(transcriptTabBtn).toBeVisible();

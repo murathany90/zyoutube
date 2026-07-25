@@ -4,7 +4,7 @@ export class AIProviderError extends Error implements AIError {
   code: AIErrorCode;
   userMessage: string;
   retryable: boolean;
-  providerId?: AIProviderId;
+  providerId?: AIProviderId | 'gemini-gem';
   statusCode?: number;
   debugMessage?: string;
 
@@ -12,7 +12,7 @@ export class AIProviderError extends Error implements AIError {
     code: AIErrorCode;
     userMessage: string;
     retryable: boolean;
-    providerId?: AIProviderId;
+    providerId?: AIProviderId | 'gemini-gem';
     statusCode?: number;
     debugMessage?: string;
   }) {

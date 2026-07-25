@@ -4,13 +4,13 @@ Bu proje, React, Vite, TypeScript ve TailwindCSS kullanarak geliştirilmiş, do�
 
 ## Özellikler
 
-- **Doğrudan Arayüz Entegrasyonu**: Chrome Side Panel yerine doğrudan YouTube oynatıcısının altına "AI Özet" paneli enjekte edilir. Bu sayede videoyu izlerken özet ve transkript sekmelerine kesintisiz erişebilirsiniz.
+- **Doğrudan Arayüz Entegrasyonu**: Chrome Side Panel yerine doğrudan YouTube oynatıcısının yanındaki ikincil sütuna (#secondary) "AI Özet" paneli enjekte edilir. Bu sayede videoyu izlerken özet ve transkript sekmelerine kesintisiz erişebilirsiniz.
 - **Güvenli AI Sağlayıcıları**:
-  - Gemini API desteği
-  - OpenAI Uyumlu API desteği (DeepSeek, Local LLM'ler vb.)
-  - Chrome Yerel AI (window.ai) desteği
+  - **Gemini Gem Web Otomasyonu**: Gemini API kullanmak yerine, tarayıcınızda açık olan Google/Gemini oturumunu kullanır ve belirlediğiniz Gemini Gem URL'si üzerinden web otomasyonu ile özet çıkarır.
+  - **OpenAI Uyumlu API**: Kendi API anahtarınızı (DeepSeek, LMStudio vb.) kullanarak özet alabilirsiniz.
+  - **Chrome Yerel AI**: Destekleyen tarayıcılarda `window.ai` üzerinden tamamen yerel özetleme yapar.
 - **Gelişmiş Transkript Yakalama**: İzole edilmiş Content Script sınırlarını aşarak YouTube oynatıcısının verisine `executeScript({ world: 'MAIN' })` üzerinden doğrudan erişir. Otomatik oluşturulmuş ve elle eklenmiş altyazıları kusursuz ayrıştırır.
-- **Güvenli Ayarlar Yönetimi**: API anahtarları `chrome.storage.local` ve `session` üzerinde tutulur. Sayfaya hiçbir zaman enjekte edilmez. İstekler Background Service Worker üzerinden atılır.
+- **Güvenli Ayarlar Yönetimi**: Ayarlar `chrome.storage.local` üzerinde tutulur. İstekler Background Service Worker üzerinden atılır. API key gibi hassas bilgiler DOM'a sızdırılmaz.
 - **Gelişmiş Hata Yönetimi**: Ağ hataları, eksik API anahtarları, model limit aşımı ve Markdown içinde dönen bozuk JSON'ları otomatik ayrıştıran (fallback destekli) bir altyapı.
 - **Kapsamlı Test Altyapısı**: Vitest birim testleri ve Playwright destekli uçtan uca (E2E) gerçek paket doğrulama testleri içerir.
 

@@ -46,11 +46,8 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
     await popupPage.goto(`chrome-extension://${extensionId}/index.html`);
     
     // Yalnızca ayarlar ve yönetim alanı var. Uzun özet yok.
-    const title = popupPage.locator('h1', { hasText: 'AI Özet Ayarları' });
+    const title = popupPage.locator('h1', { hasText: 'ZYouTube Ayarları' });
     await expect(title).toBeVisible();
-
-    const openPanelBtn = popupPage.locator('button', { hasText: "Panel'i Aç" });
-    await expect(openPanelBtn).toBeVisible();
 
     await popupPage.close();
   });
@@ -63,6 +60,7 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
       <html>
         <head><title>YouTube</title></head>
         <body>
+          <div id="secondary"><div id="secondary-inner"></div></div>
           <div id="above-the-fold">
             <div id="top-level-buttons-computed" style="display:flex;"></div>
           </div>
@@ -111,16 +109,10 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
     const button = page.locator('#ai-summary-btn');
     await expect(button).toBeVisible({ timeout: 5000 });
     
-    // Popup'tan panel açma tetikleyicisi
-    const popupPage = await browserContext.newPage();
-    await popupPage.goto(`chrome-extension://${extensionId}/index.html`);
-    const openPanelBtn = popupPage.locator('button', { hasText: "Panel'i Aç" });
-    await openPanelBtn.click();
-    await popupPage.close();
-
+    // Panel otomatik açılmış olmalı (varsayılan ayar) veya butona basarak açılır
     // Panel açıldı mı?
-    const panel = page.locator('#ai-summary-panel-container');
-    await expect(panel).toBeVisible();
+    const panel = page.locator('#zyoutube-panel-container');
+    await expect(panel).toBeVisible({ timeout: 5000 });
 
     // Transkript sekmesine geçiş
     const transcriptTabBtn = page.getByRole('button', { name: 'Transkript' });

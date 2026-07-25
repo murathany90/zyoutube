@@ -1,36 +1,42 @@
 import { SummaryRequest } from '../ai/types';
 import { setupAIMessageHandlers } from './ai-message-handler';
+import { GemSettingsService } from '../gem/settings';
 
 export type ExtensionMessage =
   | { type: 'YOUTUBE_URL_CHANGED'; url: string }
   | { type: 'GET_PLAYER_RESPONSE'; requestId: string; expectedVideoId: string }
   | { type: 'FETCH_CAPTION'; requestId: string; url: string }
   | { type: 'START_SUMMARY'; request: SummaryRequest }
-  | { type: 'CANCEL_SUMMARY'; taskId: string };
+  | { type: 'CANCEL_SUMMARY'; taskId: string }
+  | { type: 'GET_PANEL_SETTINGS' }
+  | { type: 'GET_GEM_SETTINGS' }
+  | { type: 'PANEL_SETTINGS_CHANGED' }
+  | { type: 'COPY_TO_CLIPBOARD'; text: string };
 
 console.log('Background service worker initialized.');
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('YouTube AI Summary Extension Installed.');
+  console.log('ZYouTube Extension Installed.');
+  // Migration
+  GemSettingsService.migrateFromGeminiApi().then(r => {
+    if (r.migrated) console.log('Migration:', r.message);
+  });
 });
 
 setupAIMessageHandlers();
 
-// Listener for tab updates to notify content script of SPA navigation
+// Tab updates for SPA navigation
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.url && (tab.url?.includes('youtube.com/watch') || tab.url?.includes('localhost:3000'))) {
-    chrome.tabs.sendMessage(tabId, { type: 'YOUTUBE_URL_CHANGED', url: changeInfo.url }).catch(() => {
-      // Ignore error if content script isn't ready
-    });
+    chrome.tabs.sendMessage(tabId, { type: 'YOUTUBE_URL_CHANGED', url: changeInfo.url }).catch(() => {});
   }
 });
 
-// The MAIN world injected function. Must not rely on closures.
+// MAIN world injection for player response
 function fetchPlayerResponseFromMainWorld(): any {
   try {
     const p = (window as any).ytInitialPlayerResponse;
     if (p) {
-      // Return a stripped down version to avoid giant objects
       return {
         videoId: p.videoDetails?.videoId,
         durationMs: p.videoDetails?.lengthSeconds ? parseInt(p.videoDetails.lengthSeconds) * 1000 : null,
@@ -50,8 +56,25 @@ function fetchPlayerResponseFromMainWorld(): any {
 }
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendResponse) => {
+  // Panel/Gem settings requests (from popup — no tab required)
+  if (message.type === 'GET_PANEL_SETTINGS') {
+    GemSettingsService.getPanelSettings().then(s => sendResponse(s)).catch(() => sendResponse(null));
+    return true;
+  }
+  if (message.type === 'GET_GEM_SETTINGS') {
+    GemSettingsService.getGemSettings().then(s => sendResponse(s)).catch(() => sendResponse(null));
+    return true;
+  }
+
+  // Clipboard (from content script)
+  if (message.type === 'COPY_TO_CLIPBOARD') {
+    // Service worker'da clipboard API mevcut değil, content script'e devredilir
+    return;
+  }
+
+  // Tab-dependent messages
   if (!sender.tab?.id) return;
-  if (sender.frameId !== 0) return; // Only main frame
+  if (sender.frameId !== 0) return;
   if (!sender.tab.url?.includes('youtube.com/watch') && !sender.tab.url?.includes('localhost:3000')) return;
 
   if (message.type === 'GET_PLAYER_RESPONSE') {
@@ -69,11 +92,10 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
     }).catch(e => {
       sendResponse({ success: false, error: e.message });
     });
-    return true; // Keep channel open for async
+    return true;
   }
 
   if (message.type === 'FETCH_CAPTION') {
-    // Validate URL
     try {
       const url = new URL(message.url);
       if (url.protocol !== 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
@@ -84,31 +106,27 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
         sendResponse({ success: false, error: 'Invalid host' });
         return;
       }
-      
+
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
       fetch(url.toString(), { signal: controller.signal })
         .then(res => {
           clearTimeout(timeoutId);
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          // Ensure we don't fetch massive non-xml content
           const contentType = res.headers.get('content-type') || '';
           if (!contentType.includes('xml') && !url.hostname.includes('localhost')) {
-             throw new Error('Invalid content type');
+            throw new Error('Invalid content type');
           }
           return res.text();
         })
         .then(text => {
-          if (text.length > 5000000) { // Max 5MB
-             throw new Error('Response too large');
-          }
+          if (text.length > 5000000) throw new Error('Response too large');
           sendResponse({ success: true, data: text });
         })
         .catch(err => {
           sendResponse({ success: false, error: err.message });
         });
-
     } catch (e: any) {
       sendResponse({ success: false, error: e.message });
     }

@@ -49,15 +49,15 @@ describe('SummaryCache', () => {
   };
 
   it('should return null if cache miss', async () => {
-    const res = await SummaryCache.get(dummyRequest, 'gemini-api', 'model1');
+    const res = await SummaryCache.get(dummyRequest, 'openai-compatible', 'model1');
     expect(res).toBeNull();
   });
 
   it('should return result if cache hit', async () => {
     const dummyResult: any = { title: 'Cached Summary' };
-    await SummaryCache.set(dummyRequest, 'gemini-api', 'model1', dummyResult);
+    await SummaryCache.set(dummyRequest, 'openai-compatible', 'model1', dummyResult);
 
-    const res = await SummaryCache.get(dummyRequest, 'gemini-api', 'model1');
+    const res = await SummaryCache.get(dummyRequest, 'openai-compatible', 'model1');
     expect(res).not.toBeNull();
     expect(res?.title).toBe('Cached Summary');
   });

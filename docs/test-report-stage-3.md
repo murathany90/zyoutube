@@ -7,7 +7,7 @@ Bu rapor, Aşama 3 (AI Provider Architecture, Settings, Structured Summary) kaps
 | Kriter | Doğrulama Yöntemi | Durum | Notlar |
 | :--- | :--- | :---: | :--- |
 | **Provider Arayüzü** | Kod İncelemesi | ✅ | `AIProvider` arayüzü ortaklaştırıldı. (`src/ai/types.ts`, `src/ai/registry.ts`) |
-| **Gemini API** | Birim Test ile Doğrulandı | ✅ | `gemini-api-provider.ts` ve birim testleri oluşturuldu. |
+| **Gemini Gem** | E2E Test Edilecek | ⚠️ | Gemini API yerine kullanıcının Gem URLsine mesaj atan otomasyon yapısı hedeflendi. |
 | **OpenAI Uyumlu** | Birim Test ile Doğrulandı | ✅ | `openai-compatible-provider.ts` eklendi, `baseUrl` destekleniyor. |
 | **Prompt Builder & Parser** | Birim Test ile Doğrulandı | ✅ | `PromptBuilder` ve `ResponseParser` birim testlerle kapsama alındı. Hiyerarşik özetleme destekleniyor. |
 | **Uzun Transkript Chunking** | Birim Test ile Doğrulandı | ✅ | `src/ai/chunker.test.ts` ile metinlerin model token sınırlarına göre bölünmesi doğrulandı. |
@@ -28,7 +28,7 @@ Bu rapor, Aşama 3 (AI Provider Architecture, Settings, Structured Summary) kaps
 | Kriter | Doğrulama Yöntemi | Durum | Notlar |
 | :--- | :--- | :---: | :--- |
 | **Popup Arayüzü** | Fixture E2E Test ile Doğrulandı | ✅ | Popup sadece ayar yönetimi ve sağlayıcılar için sekmeli yapıya dönüştürüldü. Ayrıca "API anahtarı parola kasası değildir" güvenlik uyarısı eklendi. |
-| **Panel Entegrasyonu** | Fixture E2E Test ile Doğrulandı | ✅ | YouTube video oynatıcısının altına eklenen sekme mimarisine `SummaryTab.tsx` entegre edildi. |
+| **Panel Entegrasyonu** | Fixture E2E Test ile Doğrulandı | ✅ | YouTube video oynatıcısının sağındaki ikincil sütuna (#secondary) eklenen sekme mimarisine `SummaryTab.tsx` entegre edildi. |
 | **Zaman Aşımı / İptal** | Kod İncelemesi | ✅ | `AbortController` kullanılarak kullanıcının veya timeout durumunun işlemi iptal etmesi sağlandı. Background tarafında `CANCEL_SUMMARY` dinleyicisi eklendi. |
 | **Video Değişimi (SPA)** | Fixture E2E Test ile Doğrulandı | ✅ | YouTube içerisinde sayfalar arası geçişte panelin temizlenip yeni video için yeniden oluşturulması doğrulandı. |
 

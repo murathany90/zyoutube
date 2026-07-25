@@ -51,14 +51,17 @@ test.describe('Privacy and Security Validation', () => {
   test('API key should never be leaked in DOM, Console or IndexedDB', async () => {
     // 1. Setup - Open popup and set API key
     await page.goto(`chrome-extension://${extensionId}/index.html`);
-    await page.waitForSelector('text=AI Özet Ayarları');
+    await page.waitForSelector('text=ZYouTube Ayarları');
     
-    // Choose Gemini tab and enter API key
-    await page.locator('button:has-text("Gemini")').click();
+    // Choose API tab and enter API key
+    await page.locator('button:has-text("API")').click();
+    
+    // There are 3 inputs in API tab: baseUrl, apiKey, model
+    // We want the password one (API key)
     await page.locator('input[type="password"]').first().fill(SECRET_KEY);
     
     // Check it's saved by waiting for success message
-    await expect(page.locator('text=Ayarlar kaydedildi')).toBeVisible();
+    await expect(page.locator('text=Kaydedildi')).toBeVisible();
 
     // 2. Open YouTube page (or our fixture)
     await page.goto('http://localhost:3000/?v=dQw4w9WgXcQ'); // Assuming we have server.js running
@@ -66,10 +69,17 @@ test.describe('Privacy and Security Validation', () => {
     // Trigger Summary
     const summaryBtn = page.locator('#ai-summary-btn');
     await summaryBtn.waitFor({ state: 'visible', timeout: 5000 });
-    await summaryBtn.click();
     
+    // Open the panel if not open
+    const panel = page.locator('#zyoutube-panel-container');
+    const isPanelVisible = await panel.isVisible();
+    if (!isPanelVisible) {
+      await summaryBtn.click();
+      await expect(panel).toBeVisible();
+    }
+
     // Start generating summary
-    await page.locator('text=Şimdi Özetle').click();
+    await page.locator('button', { hasText: /Özetle/ }).first().click();
 
     // Wait for the mock to return or fail (it will fail because TEST_SECRET_DO_NOT_LEAK_12345 is invalid)
     await page.waitForTimeout(3000); 

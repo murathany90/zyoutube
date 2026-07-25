@@ -1,69 +1,233 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import '../index.css';
 import { TranscriptTab } from './TranscriptTab';
 import { SummaryTab } from './components/SummaryTab';
+import { GemSettingsService } from '../gem/settings';
+import { PanelSettings } from '../gem/types';
 
-const Panel = ({ videoId }: { videoId: string }) => {
-  const [isOpen, setIsOpen] = useState(true);
-  const [activeTab, setActiveTab] = useState<'summary' | 'transcript'>('summary');
-  
-  // Try to grab title and url from the page
+type PanelTab = 'summary' | 'transcript' | 'keyideas' | 'ask' | 'learn';
+
+const Panel = ({ videoId, onClose }: { videoId: string; onClose: () => void }) => {
+  const [activeTab, setActiveTab] = useState<PanelTab>('summary');
   const title = document.querySelector('h1.ytd-watch-metadata')?.textContent?.trim() || 'Bilinmeyen Video';
   const url = window.location.href;
 
-  if (!isOpen) return null;
+  // Video değişiminde state sıfırla
+  useEffect(() => {
+    setActiveTab('summary');
+  }, [videoId]);
+
+  const tabs: { id: PanelTab; label: string; enabled: boolean }[] = [
+    { id: 'summary', label: 'Özet', enabled: true },
+    { id: 'transcript', label: 'Transkript', enabled: true },
+    { id: 'keyideas', label: 'Ana Fikirler', enabled: false },
+    { id: 'ask', label: 'Sor', enabled: false },
+    { id: 'learn', label: 'Öğren', enabled: false },
+  ];
 
   return (
-    <div className="mt-4 p-4 rounded-lg bg-gray-100 dark:bg-[#272727] text-black dark:text-white border border-gray-300 dark:border-gray-600 mb-4 shadow-sm">
-      <div className="flex justify-between items-center mb-4">
-        <h2 className="text-lg font-bold">AI Özet & Transkript</h2>
-        <button 
-          onClick={() => setIsOpen(false)}
-          className="text-gray-500 hover:text-gray-800 dark:hover:text-gray-300"
-        >
-          Kapat
-        </button>
+    <div className="zyoutube-panel" style={{
+      width: '100%',
+      height: 'var(--zy-panel-height, 500px)',
+      minHeight: '420px',
+      maxHeight: 'calc(100vh - 90px)',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      borderRadius: '12px',
+      border: '1px solid var(--zy-border, #e5e7eb)',
+      backgroundColor: 'var(--zy-bg, #f9fafb)',
+      color: 'var(--zy-text, #111827)',
+      marginBottom: '16px',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+    }}>
+      {/* Fixed header */}
+      <div style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: '10px 14px',
+        borderBottom: '1px solid var(--zy-border, #e5e7eb)',
+        backgroundColor: 'var(--zy-header-bg, #ffffff)',
+        borderRadius: '12px 12px 0 0',
+        flexShrink: 0,
+      }}>
+        <h2 style={{ fontSize: '14px', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#ef4444' }}>
+            <path d="M12 2L9.19 8.63L2 9.24L7.65 13.97L5.82 21L12 17.27L18.18 21L16.35 13.97L22 9.24L14.81 8.63L12 2Z" />
+          </svg>
+          ZYouTube AI
+        </h2>
+        <button onClick={onClose}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#9ca3af', fontSize: '16px' }}
+          title="Paneli Gizle"
+        >✕</button>
       </div>
-      <div className="flex gap-4 border-b border-gray-300 dark:border-gray-600 pb-2 mb-4 overflow-x-auto hide-scrollbar">
-        <button 
-          onClick={() => setActiveTab('summary')}
-          className={`font-semibold pb-1 whitespace-nowrap ${activeTab === 'summary' ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'}`}
-        >
-          Özet
-        </button>
-        <button 
-          onClick={() => setActiveTab('transcript')}
-          className={`font-semibold pb-1 whitespace-nowrap ${activeTab === 'transcript' ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'}`}
-        >
-          Transkript
-        </button>
-        <button className="font-semibold text-gray-400 dark:text-gray-500 pb-1 cursor-not-allowed whitespace-nowrap">Ana Fikirler</button>
-        <button className="font-semibold text-gray-400 dark:text-gray-500 pb-1 cursor-not-allowed whitespace-nowrap">Sor</button>
-        <button className="font-semibold text-gray-400 dark:text-gray-500 pb-1 cursor-not-allowed whitespace-nowrap">Öğren</button>
+
+      {/* Fixed tabs */}
+      <div style={{
+        display: 'flex',
+        gap: '0',
+        borderBottom: '1px solid var(--zy-border, #e5e7eb)',
+        backgroundColor: 'var(--zy-header-bg, #ffffff)',
+        flexShrink: 0,
+        overflowX: 'auto',
+      }}>
+        {tabs.map(t => (
+          <button
+            key={t.id}
+            onClick={() => t.enabled && setActiveTab(t.id)}
+            disabled={!t.enabled}
+            style={{
+              flex: '1 0 auto',
+              padding: '8px 12px',
+              fontSize: '12px',
+              fontWeight: 600,
+              background: 'none',
+              border: 'none',
+              borderBottom: activeTab === t.id ? '2px solid #ef4444' : '2px solid transparent',
+              color: !t.enabled ? '#d1d5db' : activeTab === t.id ? '#ef4444' : '#6b7280',
+              cursor: t.enabled ? 'pointer' : 'not-allowed',
+              whiteSpace: 'nowrap',
+              transition: 'color 0.15s, border-color 0.15s',
+            }}
+          >{t.label}</button>
+        ))}
       </div>
-      
-      {activeTab === 'summary' && <SummaryTab videoId={videoId} title={title} url={url} />}
-      {activeTab === 'transcript' && <TranscriptTab videoId={videoId} />}
+
+      {/* Scrollable content */}
+      <div className="zyoutube-panel-content" style={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: 'auto',
+        padding: '12px',
+      }}>
+        {activeTab === 'summary' && <SummaryTab videoId={videoId} title={title} url={url} />}
+        {activeTab === 'transcript' && <TranscriptTab videoId={videoId} />}
+        {activeTab === 'keyideas' && <div style={{ color: '#9ca3af', fontSize: '13px', padding: '20px', textAlign: 'center' }}>Yakında...</div>}
+        {activeTab === 'ask' && <div style={{ color: '#9ca3af', fontSize: '13px', padding: '20px', textAlign: 'center' }}>Yakında...</div>}
+        {activeTab === 'learn' && <div style={{ color: '#9ca3af', fontSize: '13px', padding: '20px', textAlign: 'center' }}>Yakında...</div>}
+      </div>
     </div>
   );
 };
 
+// ─── Mount/unmount yönetimi ───────────────────────────
+
 let panelRoot: Root | null = null;
 let currentVideoId = '';
+let panelHiddenForTab = false;
 
-const injectButton = () => {
-  console.log('injectButton called');
-  // Try to find the actions row (like, share, download)
-  const actionsRow = document.querySelector('#top-level-buttons-computed');
-  console.log('actionsRow:', actionsRow);
-  
-  if (!actionsRow) return false;
-  
-  if (document.getElementById('ai-summary-btn')) {
-    console.log('btn already exists');
+function getVideoId(): string | null {
+  if (window.location.href.includes('youtube.com/watch')) {
+    return new URLSearchParams(window.location.search).get('v');
+  }
+  if (window.location.href.includes('localhost:3000')) {
+    return new URLSearchParams(window.location.search).get('v') || 'dQw4w9WgXcQ';
+  }
+  return null;
+}
+
+function findSecondary(): HTMLElement | null {
+  return document.querySelector('#secondary-inner') || document.querySelector('#secondary');
+}
+
+function getPlayerHeight(): number {
+  const player = document.querySelector('#player-container-outer, #movie_player, .html5-video-player') as HTMLElement;
+  if (player) {
+    const rect = player.getBoundingClientRect();
+    if (rect.height > 200) return Math.round(rect.height);
+  }
+  return 500;
+}
+
+function applyTheme() {
+  const isDark = document.documentElement.getAttribute('dark') !== null ||
+    document.querySelector('html[dark]') !== null ||
+    getComputedStyle(document.body).backgroundColor.includes('rgb(15') ||
+    getComputedStyle(document.body).backgroundColor.includes('rgb(32');
+
+  const container = document.getElementById('zyoutube-panel-container');
+  if (container) {
+    const newBg = isDark ? '#1f1f1f' : '#f9fafb';
+    if (container.style.getPropertyValue('--zy-bg') !== newBg) {
+      container.style.setProperty('--zy-bg', newBg);
+      container.style.setProperty('--zy-header-bg', isDark ? '#282828' : '#ffffff');
+      container.style.setProperty('--zy-text', isDark ? '#e5e7eb' : '#111827');
+      container.style.setProperty('--zy-border', isDark ? '#3f3f46' : '#e5e7eb');
+    }
+  }
+}
+
+function mountPanel(videoId: string) {
+  const secondary = findSecondary();
+  if (!secondary) return false;
+
+  // Çift panel önleme
+  if (document.getElementById('zyoutube-panel-container')) {
+    // Video değiştiyse güncelle
+    if (videoId !== currentVideoId) {
+      currentVideoId = videoId;
+      renderPanel(videoId);
+    }
     return true;
   }
+
+  const container = document.createElement('div');
+  container.id = 'zyoutube-panel-container';
+  container.style.setProperty('--zy-panel-height', getPlayerHeight() + 'px');
+
+  // Önerilen videoların önüne ekle (#secondary-inner veya #secondary'nin ilk çocuğu)
+  secondary.insertBefore(container, secondary.firstChild);
+
+  applyTheme();
+
+  panelRoot = createRoot(container);
+  currentVideoId = videoId;
+  panelHiddenForTab = false;
+  renderPanel(videoId);
+
+  return true;
+}
+
+function renderPanel(videoId: string) {
+  if (!panelRoot) return;
+  panelRoot.render(
+    <Panel
+      videoId={videoId}
+      onClose={() => {
+        panelHiddenForTab = true;
+        unmountPanel();
+      }}
+    />
+  );
+}
+
+function unmountPanel() {
+  const container = document.getElementById('zyoutube-panel-container');
+  if (container) {
+    if (panelRoot) {
+      panelRoot.unmount();
+      panelRoot = null;
+    }
+    container.remove();
+  }
+}
+
+// ─── AI Özet düğmesi ────────────────────────────
+
+function injectButton() {
+  const actionsRow = document.querySelector('#top-level-buttons-computed');
+  if (!actionsRow) {
+    console.log('injectButton: #top-level-buttons-computed NOT FOUND');
+    return false;
+  }
+  if (document.getElementById('ai-summary-btn')) {
+    console.log('injectButton: already exists');
+    return true;
+  }
+  console.log('injectButton: INJECTING BUTTON');
 
   const btn = document.createElement('button');
   btn.id = 'ai-summary-btn';
@@ -77,92 +241,156 @@ const injectButton = () => {
     </div>
     <div class="yt-spec-button-shape-next__button-text-content">AI Özet</div>
   `;
-  
+
   btn.addEventListener('click', () => {
-    // Inject panel below the player or below the title
-    const secondaryInner = document.querySelector('#secondary-inner') || document.querySelector('#above-the-fold');
-    
-    if (secondaryInner) {
-      if (!document.getElementById('ai-summary-panel-container')) {
-        const container = document.createElement('div');
-        container.id = 'ai-summary-panel-container';
-        
-        // Insert right after the title/actions area
-        const titleArea = document.querySelector('#above-the-fold');
-        if (titleArea && titleArea.parentNode) {
-          titleArea.parentNode.insertBefore(container, titleArea.nextSibling);
-        } else {
-          secondaryInner.prepend(container);
-        }
-        
-        panelRoot = createRoot(container);
-      }
-      
-      if (panelRoot) {
-        panelRoot.render(<Panel videoId={currentVideoId} />);
-      }
+    if (panelHiddenForTab) {
+      // Geçici gizlenmiş — göster
+      panelHiddenForTab = false;
+      const vid = getVideoId();
+      if (vid) mountPanel(vid);
+    } else if (document.getElementById('zyoutube-panel-container')) {
+      // Panel görünür — gizle
+      panelHiddenForTab = true;
+      unmountPanel();
+    } else {
+      // Panel yok — oluştur
+      panelHiddenForTab = false;
+      const vid = getVideoId();
+      if (vid) mountPanel(vid);
     }
   });
 
   actionsRow.appendChild(btn);
   return true;
-};
+}
 
-// Handle SPA navigation
-const init = () => {
-  console.log('init called, href:', window.location.href);
-  const urlParams = new URLSearchParams(window.location.search);
-  const videoId = urlParams.get('v') || (window.location.href.includes('localhost') ? 'dQw4w9WgXcQ' : null);
-  console.log('videoId:', videoId);
-  
-  if (videoId && videoId !== currentVideoId) {
-    currentVideoId = videoId;
-    
-    // Attempt to inject button, retrying if elements aren't loaded yet
-    let retries = 0;
-    const interval = setInterval(() => {
-      if (injectButton() || retries > 10) {
-        clearInterval(interval);
-      }
-      retries++;
-    }, 1000);
+function updateButtonState() {
+  const btn = document.getElementById('ai-summary-btn');
+  if (!btn) return;
+
+  const textEl = btn.querySelector('.yt-spec-button-shape-next__button-text-content');
+  if (!textEl) return;
+
+  const hasPanel = !!document.getElementById('zyoutube-panel-container');
+  const newText = hasPanel ? 'Paneli Gizle' : 'AI Özet';
+  if (textEl.textContent !== newText) {
+    textEl.textContent = newText;
   }
-};
+}
 
-// Initial load
+// ─── Ana init akışı ─────────────────────────────
+
+async function init() {
+  console.log('ZYOUTUBE CONTENT SCRIPT INIT STARTING');
+  const videoId = getVideoId();
+  if (!videoId) {
+    console.log('NO VIDEO ID');
+    return;
+  }
+  console.log('VIDEO ID:', videoId);
+
+  try {
+    // Panel ayarlarını oku
+    const panelSettings = await GemSettingsService.getPanelSettings();
+    console.log('PANEL SETTINGS:', panelSettings.enabled);
+
+    if (!panelSettings.enabled) {
+      console.log('PANEL DISABLED');
+    // Global pasif — panel kaldır
+    unmountPanel();
+    // Buton pasif
+    const btn = document.getElementById('ai-summary-btn');
+    if (btn) {
+      const textEl = btn.querySelector('.yt-spec-button-shape-next__button-text-content');
+      if (textEl) textEl.textContent = 'Pasif';
+      btn.setAttribute('disabled', 'true');
+      btn.style.opacity = '0.5';
+    }
+    return;
+  }
+
+  // Buton enjekte et
+  let retries = 0;
+  const interval = setInterval(() => {
+    if (injectButton() || retries > 10) {
+      clearInterval(interval);
+      updateButtonState();
+    }
+    retries++;
+  }, 1000);
+
+  // Auto-open ise paneli mount et
+  if (panelSettings.autoOpenOnWatchPage && !panelHiddenForTab) {
+    if (videoId !== currentVideoId || !document.getElementById('zyoutube-panel-container')) {
+      // Secondary alanı henüz yüklenmemiş olabilir
+      let mountRetries = 0;
+      const mountInterval = setInterval(() => {
+        if (mountPanel(videoId) || mountRetries > 15) {
+          clearInterval(mountInterval);
+          updateButtonState();
+        }
+        mountRetries++;
+      }, 800);
+    }
+  }
+  } catch (err) {
+    console.log('INIT ERROR:', err);
+  }
+}
+
+// ─── SPA navigasyon ve storage listener ─────────
+
+// İlk yükleme
 if (window.location.href.includes('youtube.com/watch') || window.location.href.includes('localhost:3000')) {
   init();
 }
 
-// Listen for navigation events
+// SPA navigasyon
 chrome.runtime.onMessage.addListener((message) => {
   if (message.type === 'YOUTUBE_URL_CHANGED') {
+    panelHiddenForTab = false; // Yeni videoda geçici gizleme sıfırla
     init();
-  } else if (message.type === 'OPEN_PANEL') {
-    if (panelRoot) {
-      const container = document.getElementById('ai-summary-panel-container');
-      if (container) {
-         panelRoot.unmount();
-         panelRoot = createRoot(container);
-         panelRoot.render(<Panel videoId={currentVideoId} />);
-      }
-    } else {
-      const btn = document.getElementById('ai-summary-btn');
-      if (btn) btn.click();
-    }
+  } else if (message.type === 'PANEL_SETTINGS_CHANGED') {
+    // Popup'tan toggle değişimi
+    init();
   }
 });
 
-// Use MutationObserver for robust SPA changes
+// Storage değişimi dinle (popup toggle anında yansıması)
+if (typeof chrome !== 'undefined' && chrome.storage) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes['panel_settings']) {
+      const newSettings = changes['panel_settings'].newValue as PanelSettings;
+      if (!newSettings?.enabled) {
+        unmountPanel();
+        updateButtonState();
+      } else {
+        panelHiddenForTab = false;
+        init();
+      }
+    }
+  });
+}
+
+// MutationObserver — SPA DOM değişimleri
 const observer = new MutationObserver(() => {
   if (window.location.href.includes('youtube.com/watch') || window.location.href.includes('localhost:3000')) {
-    const urlParams = new URLSearchParams(window.location.search);
-    const videoId = urlParams.get('v') || 'dQw4w9WgXcQ'; // Fallback for testing on localhost
+    const videoId = getVideoId();
     if (videoId && videoId !== currentVideoId) {
+      panelHiddenForTab = false;
       init();
     } else if (videoId) {
-      // Ensure button stays in DOM
       injectButton();
+      updateButtonState();
+      // Panel kaybolmuşsa yeniden bağla
+      if (!panelHiddenForTab && !document.getElementById('zyoutube-panel-container')) {
+        GemSettingsService.getPanelSettings().then(ps => {
+          if (ps.enabled && ps.autoOpenOnWatchPage) {
+            mountPanel(videoId);
+          }
+        });
+      }
+      applyTheme();
     }
   }
 });

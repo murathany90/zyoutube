@@ -7,11 +7,10 @@ export function setupAIMessageHandlers() {
     if (!sender.tab || !sender.tab.id) return;
 
     if (message.type === 'START_SUMMARY') {
-      const { request } = message as { type: 'START_SUMMARY', request: SummaryRequest };
+      const { request } = message as { type: 'START_SUMMARY'; request: SummaryRequest };
       const tabId = sender.tab.id;
 
       AITaskManager.startTask(request, tabId, (status, msg, progress) => {
-        // Broadcast progress to tab
         chrome.tabs.sendMessage(tabId, {
           type: 'SUMMARY_PROGRESS',
           taskId: request.taskId,
@@ -37,13 +36,12 @@ export function setupAIMessageHandlers() {
         }).catch(() => {});
       });
 
-      // async response
       sendResponse({ success: true });
       return true;
     }
 
     if (message.type === 'CANCEL_SUMMARY') {
-      const { taskId } = message as { type: 'CANCEL_SUMMARY', taskId: string };
+      const { taskId } = message as { type: 'CANCEL_SUMMARY'; taskId: string };
       AITaskManager.cancelTask(taskId).catch(console.error);
       sendResponse({ success: true });
       return true;
