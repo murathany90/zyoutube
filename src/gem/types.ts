@@ -49,12 +49,14 @@ export interface PanelSettings {
   enabled: boolean;
   autoOpenOnWatchPage: boolean;
   defaultCollapsed: boolean;
+  hideNativeTranscript: boolean;
 }
 
 export const DEFAULT_PANEL_SETTINGS: PanelSettings = {
   enabled: true,
   autoOpenOnWatchPage: true,
   defaultCollapsed: false,
+  hideNativeTranscript: true,
 };
 
 // Gemini content script ile iletişim mesajları

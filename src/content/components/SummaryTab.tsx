@@ -6,13 +6,14 @@ import { SummaryEngine } from '../../gem/types';
 import { sendRuntimeMessage } from '../runtime-messenger';
 import { HistoryService } from '../../settings/history';
 import { TranscriptSegment } from '../../transcript/types';
-import { formatTime, renderSimpleMarkdown } from '../../utils/formatters';
+import { renderSimpleMarkdown } from '../../utils/formatters';
 
-export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: string; url: string }) => {
+export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: { videoId: string; title: string; url: string; activeSection?: 'summary' | 'sonuc' | 'cikarimlar' | 'arastir' }) => {
   const [status, setStatus] = useState<AITaskStatus>('queued');
   const [progressMessage, setProgressMessage] = useState<string>('');
   const [result, setResult] = useState<SummaryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [currentTranscript, setCurrentTranscript] = useState<TranscriptSegment[] | null>(null);
@@ -267,14 +268,37 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
           </button>
         </div>
 
-        {/* Özet */}
-        <div style={{ backgroundColor: 'var(--zy-card-inner, rgba(0,0,0,0.03))', padding: '12px', borderRadius: '8px', border: '1px solid var(--zy-border, rgba(0,0,0,0.06))' }}>
-          <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>Özet</h3>
-          {(isDual || hasTr) && (
+        {/* Eski JSON yapısı (Geriye Dönük Uyumluluk) */}
+        {(result.keyIdeas?.length > 0 || result.sections?.length > 0) ? (
+          <>
+            <div style={{ backgroundColor: 'var(--zy-card-inner, rgba(0,0,0,0.03))', padding: '12px', borderRadius: '8px', border: '1px solid var(--zy-border, rgba(0,0,0,0.06))' }}>
+              <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>Özet</h3>
+              {(isDual || hasTr) && (
+                <div className="zy-markdown-body" dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(result.summary.tr || result.summary.en || '') }} />
+              )}
+            </div>
+            {result.keyIdeas?.length > 0 && (
+              <div>
+                <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>💡 Ana Fikirler</h3>
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {result.keyIdeas.map((ki, idx) => (
+                    <li key={idx} style={{ padding: '8px', backgroundColor: 'var(--zy-card-bg, #fff)', border: '1px solid var(--zy-border, #e5e7eb)', borderRadius: '6px' }}>
+                      <strong>{(isDual || hasTr) ? (ki.title?.tr || ki.title?.en) : (ki.title?.en || ki.title?.tr)}</strong>
+                      <p style={{ margin: '4px 0 0', color: 'var(--zy-text-muted, #6b7280)', fontSize: '12px' }}>
+                        {(isDual || hasTr) ? (ki.description?.tr || ki.description?.en) : (ki.description?.en || ki.description?.tr)}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        ) : (
+          /* Yeni Markdown Yapı (Ana Sekmelere Bağlı) */
+          <div>
             <div 
               className="zy-markdown-body" 
               style={{ lineHeight: '1.7', color: 'var(--zy-text, #374151)', wordBreak: 'break-word', overflowWrap: 'break-word' }} 
-              dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(result.summary.tr || result.summary.en || '') }} 
               onClick={(e) => {
                 const target = e.target as HTMLElement;
                 if (target.classList.contains('zy-timestamp-link')) {
@@ -288,76 +312,48 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
                   }
                 }
               }}
+              dangerouslySetInnerHTML={{ 
+                __html: renderSimpleMarkdown((() => {
+                  let rawText = (isDual || hasTr) ? (result.summary.tr || '') : (result.summary.en || '');
+                  
+                  // Sekmelere göre parçalama (Bitişik başlıkları da ayrıştırarak düzgün markdown H3'e çeviririz)
+                  const getSection = (startMarker: string, endMarkers: string[]) => {
+                    let startIndex = rawText.indexOf(startMarker);
+                    if (startIndex === -1) return '';
+                    let endIndex = rawText.length;
+                    for (const em of endMarkers) {
+                      const idx = rawText.indexOf(em, startIndex + startMarker.length);
+                      if (idx !== -1 && idx < endIndex) {
+                        endIndex = idx;
+                      }
+                    }
+                    return rawText.substring(startIndex, endIndex).trim();
+                  };
+
+                  let sectionText = rawText;
+                  if (activeSection === 'summary') {
+                    const p1 = getSection('📝 Genel Özet', ['🎯 Sonuç', '💡 Çıkarımlar', '🔍 Araştır']);
+                    sectionText = p1 || rawText; // Bulamazsa tümünü göster
+                  } else if (activeSection === 'sonuc') {
+                    sectionText = getSection('🎯 Sonuç', ['💡 Çıkarımlar', '🔍 Araştır', '📝 Genel Özet']);
+                  } else if (activeSection === 'cikarimlar') {
+                    sectionText = getSection('💡 Çıkarımlar', ['🔍 Araştır', '📝 Genel Özet', '🎯 Sonuç']);
+                  } else if (activeSection === 'arastir') {
+                    sectionText = getSection('🔍 Araştır', ['📝 Genel Özet', '🎯 Sonuç', '💡 Çıkarımlar']);
+                  }
+                  
+                  // Başlıkların başına ve sonuna yeni satır ekleyip markdown başlığı (##) yapıyoruz
+                  // Böylece scraper newline'ları silmiş olsa bile görüntü düzeliyor
+                  return sectionText
+                    .replace(/\s*(📝 Genel Özet)\s*/g, '\n\n## $1\n\n')
+                    .replace(/\s*(⏱️ Zaman Damgalı Detaylı Özet)\s*/g, '\n\n## $1\n\n')
+                    .replace(/\s*(🎯 Sonuç)\s*/g, '\n\n## $1\n\n')
+                    .replace(/\s*(💡 Çıkarımlar)\s*/g, '\n\n## $1\n\n')
+                    .replace(/\s*(🔍 Araştır)\s*/g, '\n\n## $1\n\n')
+                    .trim();
+                })())
+              }} 
             />
-          )}
-          {isDual && <hr style={{ border: 'none', borderTop: '1px solid rgba(0,0,0,0.06)', margin: '8px 0' }} />}
-          {(isDual || !hasTr) && (
-             <div 
-               className="zy-markdown-body" 
-               style={{ lineHeight: '1.7', color: 'var(--zy-text, #374151)', wordBreak: 'break-word', overflowWrap: 'break-word' }} 
-               dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(result.summary.en || result.summary.tr || '') }} 
-               onClick={(e) => {
-                 const target = e.target as HTMLElement;
-                 if (target.classList.contains('zy-timestamp-link')) {
-                   const timeStr = target.getAttribute('data-time');
-                   if (timeStr) {
-                     const parts = timeStr.split(':').map(Number);
-                     let seconds = 0;
-                     if (parts.length === 3) seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
-                     else if (parts.length === 2) seconds = parts[0] * 60 + parts[1];
-                     handleTimeClick(seconds * 1000);
-                   }
-                 }
-               }}
-             />
-          )}
-        </div>
-
-        {/* Ana Fikirler */}
-        {result.keyIdeas?.length > 0 && (
-          <div>
-            <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>💡 Ana Fikirler</h3>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {result.keyIdeas.map((ki, idx) => (
-                <li key={idx} style={{ padding: '8px', backgroundColor: 'var(--zy-card-bg, #fff)', border: '1px solid var(--zy-border, #e5e7eb)', borderRadius: '6px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
-                  {ki.startTimeMs != null && (
-                    <button onClick={() => handleTimeClick(ki.startTimeMs)}
-                      style={{ fontSize: '11px', backgroundColor: 'var(--zy-item-bg, #f3f4f6)', padding: '2px 6px', borderRadius: '3px', border: 'none', color: 'var(--zy-text-muted, #6b7280)', cursor: 'pointer', flexShrink: 0 }}
-                    >{formatTime(ki.startTimeMs)}</button>
-                  )}
-                  <div>
-                    <strong>{(isDual || hasTr) ? (ki.title?.tr || ki.title?.en) : (ki.title?.en || ki.title?.tr)}</strong>
-                    <p style={{ margin: '4px 0 0', color: 'var(--zy-text-muted, #6b7280)', fontSize: '12px' }}>
-                      {(isDual || hasTr) ? (ki.description?.tr || ki.description?.en) : (ki.description?.en || ki.description?.tr)}
-                    </p>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Bölümler */}
-        {result.sections?.length > 0 && (
-          <div>
-            <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>Bölümler</h3>
-            <div style={{ borderLeft: '2px solid var(--zy-border, #e5e7eb)', paddingLeft: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {result.sections.map((sec, idx) => (
-                <div key={idx}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <strong>{(isDual || hasTr) ? (sec.title?.tr || sec.title?.en) : (sec.title?.en || sec.title?.tr)}</strong>
-                    {sec.startTimeMs != null && (
-                      <button onClick={() => handleTimeClick(sec.startTimeMs)}
-                        style={{ fontSize: '10px', color: 'var(--zy-text-muted, #6b7280)', background: 'none', border: 'none', cursor: 'pointer' }}
-                      >[{formatTime(sec.startTimeMs)}]</button>
-                    )}
-                  </div>
-                  <p style={{ margin: '4px 0 0', color: 'var(--zy-text-muted, #6b7280)', fontSize: '12px' }}>
-                    {(isDual || hasTr) ? (sec.summary?.tr || sec.summary?.en) : (sec.summary?.en || sec.summary?.tr)}
-                  </p>
-                </div>
-              ))}
-            </div>
           </div>
         )}
 

@@ -37,23 +37,23 @@ const ExtensionInvalidated = () => (
 // ============================================================================
 // MAIN PANEL COMPONENT (no close button)
 // ============================================================================
-type PanelTab = 'summary' | 'transcript' | 'keyideas' | 'ask' | 'learn';
+type PanelTab = 'summary' | 'transcript' | 'sonuc' | 'cikarimlar' | 'arastir';
 
 const Panel = ({ videoId, isInvalidated }: { videoId: string; isInvalidated: boolean }) => {
-  const [activeTab, setActiveTab] = useState<PanelTab>('summary');
+  const [activeTab, setActiveTab] = useState<PanelTab>('transcript');
   const title = document.querySelector('h1.ytd-watch-metadata')?.textContent?.trim() || 'Bilinmeyen Video';
   const url = window.location.href;
 
   useEffect(() => {
-    setActiveTab('summary');
+    setActiveTab('transcript');
   }, [videoId]);
 
   const tabs: { id: PanelTab; label: string; enabled: boolean }[] = [
-    { id: 'summary', label: 'Özet', enabled: true },
     { id: 'transcript', label: 'Transkript', enabled: true },
-    { id: 'keyideas', label: 'Ana Fikirler', enabled: false },
-    { id: 'ask', label: 'Sor', enabled: false },
-    { id: 'learn', label: 'Öğren', enabled: false },
+    { id: 'summary', label: 'Özet', enabled: true },
+    { id: 'sonuc', label: 'Sonuç', enabled: true },
+    { id: 'cikarimlar', label: 'Çıkarımlar', enabled: true },
+    { id: 'arastir', label: 'Araştır', enabled: true },
   ];
 
   return (
@@ -133,20 +133,11 @@ const Panel = ({ videoId, isInvalidated }: { videoId: string; isInvalidated: boo
             overflowY: 'auto',
             padding: '12px',
           }}>
-            <div style={{ display: activeTab === 'summary' ? 'block' : 'none' }}>
-              <SummaryTab videoId={videoId} title={title} url={url} />
+            <div style={{ display: ['summary', 'sonuc', 'cikarimlar', 'arastir'].includes(activeTab) ? 'block' : 'none' }}>
+              <SummaryTab videoId={videoId} title={title} url={url} activeSection={activeTab as 'summary' | 'sonuc' | 'cikarimlar' | 'arastir'} />
             </div>
             <div style={{ display: activeTab === 'transcript' ? 'block' : 'none' }}>
               <TranscriptTab videoId={videoId} />
-            </div>
-            <div style={{ display: activeTab === 'keyideas' ? 'block' : 'none', color: '#9ca3af', fontSize: '13px', padding: '20px', textAlign: 'center' }}>
-              Yakında...
-            </div>
-            <div style={{ display: activeTab === 'ask' ? 'block' : 'none', color: '#9ca3af', fontSize: '13px', padding: '20px', textAlign: 'center' }}>
-              Yakında...
-            </div>
-            <div style={{ display: activeTab === 'learn' ? 'block' : 'none', color: '#9ca3af', fontSize: '13px', padding: '20px', textAlign: 'center' }}>
-              Yakında...
             </div>
           </div>
         </>

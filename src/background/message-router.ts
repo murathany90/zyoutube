@@ -312,7 +312,7 @@ async function fetchCaptionFromMainWorldInjected(captionUrl: string, format: str
   }
 }
 
-async function scrapeTranscriptPanelInjected(): Promise<{ success: boolean; segments?: Array<{ startTimeMs: number; endTimeMs: number; durationMs: number; text: string; languageCode: string }>; error?: string }> {
+async function scrapeTranscriptPanelInjected(hideNativeTranscript: boolean = true): Promise<{ success: boolean; segments?: Array<{ startTimeMs: number; endTimeMs: number; durationMs: number; text: string; languageCode: string }>; error?: string }> {
   const _log: string[] = [];
   const _w = (m: string) => { _log.push(m); console.log('ZYouTube Scrape:', m); };
 
@@ -323,12 +323,14 @@ async function scrapeTranscriptPanelInjected(): Promise<{ success: boolean; segm
 
   try {
     _w('Starting scraping...');
+    let weOpenedIt = false;
 
     // Step 1: Read already open native segments
     let segmentsNodes = getSegments();
     if (segmentsNodes.length > 0) {
       _w('Segments already open, skipping click.');
     } else {
+      weOpenedIt = true;
       // Step 2: Click Native "Show transcript" button
       _w('Step 2: Looking for native transcript button...');
 
@@ -492,6 +494,16 @@ async function scrapeTranscriptPanelInjected(): Promise<{ success: boolean; segm
     });
 
     _w(`Extracted ${segments.length} non-empty segments`);
+
+    if (hideNativeTranscript && weOpenedIt) {
+      _w('Closing native transcript panel...');
+      const closeBtn = document.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"] #visibility-button button, ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"] button[aria-label*="Close" i], ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"] button[aria-label*="kapat" i]');
+      if (closeBtn) {
+        (closeBtn as HTMLElement).click();
+        _w('Closed native panel.');
+      }
+    }
+
     if (segments.length === 0) {
       (window as any).__zyoutube_scrape_log__ = _log;
       return { success: false, error: 'NO_SEGMENTS' };
@@ -586,20 +598,26 @@ function handleTranscriptPanel(_message: any, sendResponse: (response: any) => v
     return;
   }
 
-  chrome.scripting.executeScript({
-    target: { tabId, frameIds: [0] },
-    world: 'MAIN',
-    func: scrapeTranscriptPanelInjected,
-    args: []
-  }).then(results => {
-    const result = results[0]?.result;
-    if (result?.success && result.segments) {
-      sendResponse({ success: true, segments: result.segments });
-    } else {
-      sendResponse({ success: false, error: result?.error || 'SCRAPE_FAILED' });
-    }
+  chrome.storage.local.get('panel_settings').then(data => {
+    const hideNative = data.panel_settings?.hideNativeTranscript ?? true;
+
+    chrome.scripting.executeScript({
+      target: { tabId, frameIds: [0] },
+      world: 'MAIN',
+      func: scrapeTranscriptPanelInjected,
+      args: [hideNative]
+    }).then(results => {
+      const result = results[0]?.result;
+      if (result?.success && result.segments) {
+        sendResponse({ success: true, segments: result.segments });
+      } else {
+        sendResponse({ success: false, error: result?.error || 'SCRAPE_FAILED' });
+      }
+    }).catch(e => {
+      sendResponse({ success: false, error: e.message || 'EXECUTE_SCRIPT_FAILED' });
+    });
   }).catch(e => {
-    sendResponse({ success: false, error: e.message || 'EXECUTE_SCRIPT_FAILED' });
+    sendResponse({ success: false, error: e.message || 'STORAGE_READ_FAILED' });
   });
 }
 

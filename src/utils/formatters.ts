@@ -80,13 +80,13 @@ export function renderSimpleMarkdown(text: string): string {
     // Empty line — paragraph break
     if (line.trim() === '') {
       closeList();
-      outputLines.push('<div class="zy-spacer"></div>');
+      outputLines.push('<div style="height: 12px;"></div>');
       continue;
     }
 
     // Regular text line
     closeList();
-    outputLines.push(`<div class="zy-line">${applyInline(line)}</div>`);
+    outputLines.push(`<p style="margin: 0 0 6px 0;">${applyInline(line)}</p>`);
   }
 
   closeList();

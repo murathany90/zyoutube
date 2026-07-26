@@ -34,7 +34,9 @@ Eklenti, videonun süresiyle eş zamanlı olarak akan (Auto-Sync) bir transkript
 ZYouTube, esnek bir yapay zeka entegrasyonu sunar. Kullanıcıların ihtiyaçlarına göre tamamen ücretsiz web otomasyonu veya profesyonel API kullanımı gibi seçenekler barındırır. Bu özellikler, eklenti arayüzündeki ⚙️ (Ayarlar) sekmesinden kolayca yapılandırılabilir.
 
 #### a) Gemini Web Otomasyonu (Ücretsiz ve Pratik)
-- **Nasıl Çalışır?:** Google'ın Gemini web arayüzünü (gemini.google.com) adeta bir API gibi kullanır. Siz "Özetle" tuşuna bastığınızda, arka planda gizli ve izole bir sekme açılır, çıkarılan transkript bu sekmeye bir prompt (komut) ile gönderilir, Gemini'nin yazdığı sonuç anlık olarak dinlenerek eklenti paneline yansıtılır. İşlem bitince arka plan sekmesi otomatik kapanır.
+- **Nasıl Çalışır?:** Google'ın Gemini web arayüzünü (gemini.google.com) adeta bir API gibi kullanır. Siz "Özetle" tuşuna bastığınızda, arka planda gizli ve izole bir sekme açılır, çıkarılan transkript bu sekmeye bir prompt (komut) ile gönderilir.
+- **Hızlı ve Akıllı Takip Sistemi:** Bekleme süreleri minimize edilmiştir. Eklenti veriyi Gemini'ye gönderdikten sonra sadece 4 saniye uyur, ardından her 3 saniyede bir yanıtın tamamlanıp tamamlanmadığını kontrol eder. Yanıt bittiği an, saliseler içinde veriyi alarak arka plandaki Gemini sekmesini **otomatik olarak kapatır** ve özeti ekrana yansıtır.
+- **Tıklanabilir Zaman Damgaları:** Çıkarılan özet metni içerisindeki zaman damgaları (Örn: `[15:19]`) otomatik olarak tıklanabilir mavi bağlantılara dönüştürülür. Bunlara tıklandığında video tam o saniyeye atlar. (Bu özellik "Geçmiş" sayfasında da desteklenmektedir.)
 - **Avantajları:** Resmi API kotası veya kredi kartı/ücretlendirme derdi yoktur. Tarayıcınızdaki aktif Google hesabınızı kullanır.
 - **Parametreler (Ayarlar):**
   - **Kayıtlı Gemini Adresi (Zorunlu):** Tarayıcınızda halihazırda oturum açtığınız, kullanıma hazır bir Gemini sohbetinin linkini (Örn: `https://gemini.google.com/app/1234abcd`) buraya yapıştırmanız gerekir. Eklenti sürekli yeni URL'ler yaratmak yerine sizin tanımladığınız bu sabit odayı kullanır. Bu sayede Google'ın spam ve bot korumalarına (Captcha) takılmadan, doğal bir kullanıcıymış gibi güvenli şekilde özet çıkarır.
@@ -90,6 +92,10 @@ YouTube'un altyazı URL'leri özel imzalar (`signature`, `ei`) barındırır. Bu
 ### 3. YouTube UI'a Sorunsuz Buton Ekleme
 YouTube butonu son eleman (`appendChild`) olarak eklendiğinde, dar ekranlarda (veya çok butonlu videolarda) taşma (overflow) yaşanıyor ve buton görünmez oluyordu.
 **Çözüm:** Buton her zaman araç çubuğunun en başına (`insertBefore`) eklendi. Ayrıca ikon SVG'leri `24x24px` şeklinde sabitlenerek YouTube'un Material Design yönergelerine (yt-spec-button-shape-next) tam entegre edildi.
+
+### 4. YouTube SPA (Single Page Application) Navigasyon Uyumu
+Kullanıcılar YouTube üzerinde sayfayı yenilemeden bir videodan diğerine geçtiğinde, geleneksel sayfa yükleme etkinlikleri (onload vb.) tetiklenmediği için eklentiler genellikle eski videoda takılı kalır.
+**Çözüm:** ZYouTube, arka planda (URL dinlemeye ek olarak) doğrudan YouTube'un kendi iç olaylarından olan `yt-navigate-finish` event'ini dinler. Bu sayede kullanıcı sayfayı hiç yenilemeden 10 farklı video da değiştirse, eklenti anında fark edip transkript motorunu o video için sıfırdan ve hatasız şekilde tekrar çalıştırır.
 
 ---
 

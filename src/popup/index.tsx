@@ -208,8 +208,14 @@ const Popup = () => {
             <div style={sectionTitle}>Panel Ayarları</div>
             <div style={{ background: 'var(--zy-card-bg, #fff)', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px' }}>
               <Toggle label="Eklenti Aktif" checked={panelSettings.enabled} onChange={v => togglePanelEnabled(v)} />
+              <Toggle label="Native YouTube Transkriptini Gizle" checked={panelSettings.hideNativeTranscript} onChange={v => {
+                const newSettings = { ...panelSettings, hideNativeTranscript: v };
+                GemSettingsService.savePanelSettings(newSettings);
+                setPanelSettings(newSettings);
+                showSaved();
+              }} />
               <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
-                Panel, YouTube watch sayfalarında otomatik olarak görünür. Kontrol yalnızca bu anahtarla yapılır.
+                Panel, YouTube watch sayfalarında otomatik olarak görünür. DOM'dan veri alınırken native panel açık bırakılmaz, gizlenir.
               </div>
             </div>
 

@@ -72,7 +72,7 @@ function findSendButton(): HTMLElement | null {
   return null;
 }
 
-function getLatestResponse(): string | null {
+function getLatestResponseInternal(): string | null {
   // Strategy 1: Data attributes and strict tags
   const modelContainers = document.querySelectorAll(
     '[data-message-author-role="model"], ' +
@@ -132,6 +132,19 @@ function getLatestResponse(): string | null {
   }
   
   return bestCandidate;
+}
+
+function getLatestResponse(): string | null {
+  const text = getLatestResponseInternal();
+  if (!text) return null;
+  
+  // Gemini'nin kod yürütme bloklarını yoksaymak için, son "📝 Genel Özet"i bul ve oradan sonrasını al
+  const marker = "📝 Genel Özet";
+  const lastIndex = text.lastIndexOf(marker);
+  if (lastIndex !== -1) {
+    return text.substring(lastIndex);
+  }
+  return text;
 }
 
 function isLoginPage(): boolean {

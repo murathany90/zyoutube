@@ -18,21 +18,39 @@ KURALLAR:
 1. YALNIZCA sağlanan içeriğe dayan. Bulunmayan hiçbir bilgiyi uydurma (halüsinasyon yapma).
 2. Transkriptte konuyla ilgili bilgi yoksa, bunu açıkça belirt.
 3. Zaman damgalarını (timestamps) YALNIZCA verilen segmentlerden al.
-4. Videoda doğrudan belirtilen bilgiler ile kendi çıkarımların/tahminlerin arasına net bir çizgi çek.
-5. JSON ŞEMASINA KESİNLİKLE UY. Markdown \`\`\`json bloğu içinde YALNIZCA geçerli bir JSON döndür. JSON haricinde metin yazma.
-6. İstenen dil ayarına kesinlikle uy.
+4. Çıktı formatı olarak AŞAĞIDAKİ ŞABLONA KESİNLİKLE UY. Herhangi bir kod bloğu, JSON, HTML veya ek açıklama üretme.
 ${langInstructions}
 ${lengthInstructions}
-7. Zaman damgaları (startTimeMs, endTimeMs vb.) milisaniye (ms) cinsinden bir tam sayı (number) olmalıdır. Eğer uygun bir zaman bulunamıyorsa \`null\` kullanın.
-8. "keyIdeas" alanında en fazla 5 ana fikir (veya varsa daha az) bulunmalıdır.`;
+5. Zaman damgalarını şu biçimde ekle: ▶ \`[ZAMAN]\` AÇIKLAMA.
+
+ÇIKTI ŞABLONU:
+📝 Genel Özet
+[Tek paragraf özet]
+
+⏱️ Zaman Damgalı Detaylı Özet
+▶ \`[KAYNAKTAKİ ZAMAN]\` [Bu zamanda anlatılan önemli konu]
+▶ \`[KAYNAKTAKİ ZAMAN]\` [Bu zamanda anlatılan önemli konu]
+
+🎯 Sonuç
+[Tek bir toparlayıcı paragraf]
+
+💡 Çıkarımlar
+[Birinci çıkarım]
+[İkinci çıkarım]
+[Üçüncü çıkarım]
+
+🔍 Araştır
+[Birinci araştırma konusu]
+[İkinci araştırma konusu]
+[Üçüncü araştırma konusu]`;
   }
 
   static buildUserPrompt(request: SummaryRequest, type: PromptType = 'single', customContent?: string): string {
     const content = customContent ? customContent : this.formatTranscript(request);
     
-    let instructions = `Lütfen bu transkripte dayanarak sonucu belirtilen JSON formatında üret.`;
-    if (type === 'chunk') instructions = `Lütfen transkriptin BU PARÇASINA dayanarak ara JSON özetini üret.`;
-    else if (type === 'merge') instructions = `Lütfen bu ARA ÖZETLERİ birleştirerek NİHAİ JSON sonucunu üret.`;
+    let instructions = `Lütfen bu transkripte dayanarak sonucu belirtilen Markdown şablonu formatında üret.`;
+    if (type === 'chunk') instructions = `Lütfen transkriptin BU PARÇASINA dayanarak ara özetini Markdown olarak üret.`;
+    else if (type === 'merge') instructions = `Lütfen bu ARA ÖZETLERİ birleştirerek NİHAİ sonucu Markdown formatında üret.`;
 
     return `Video Bilgileri:
 Başlık: ${request.video.title}
