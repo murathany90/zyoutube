@@ -185,20 +185,31 @@ chrome.runtime.onMessage.addListener((message: GemAutomationRequest, sender, sen
       // Metni yerleştir
       if (input.getAttribute('contenteditable') === 'true') {
         input.focus();
-        input.textContent = '';
-        // Paste event simule et
-        const pasteEvent = new ClipboardEvent('paste', {
-          bubbles: true,
-          cancelable: true,
-          clipboardData: new DataTransfer()
-        });
-        pasteEvent.clipboardData!.setData('text/plain', message.prompt);
-        input.dispatchEvent(pasteEvent);
+        // ProseMirror ve benzeri rich-text editörler için en güvenilir yöntem
+        const success = document.execCommand('insertText', false, message.prompt);
+        
+        if (!success) {
+          // Arka plan sekmelerinde (background tabs) focus() ve execCommand çalışmaz.
+          // Yöntem 1: ClipboardEvent (Paste simülasyonu)
+          try {
+            const dataTransfer = new DataTransfer();
+            dataTransfer.setData('text/plain', message.prompt);
+            const pasteEvent = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dataTransfer });
+            input.dispatchEvent(pasteEvent);
+          } catch(e) {}
+          
+          // Yöntem 2: TextEvent (Eski ama güçlü textInput simülasyonu)
+          try {
+            const textEvent = document.createEvent('TextEvent') as any;
+            textEvent.initTextEvent('textInput', true, true, window, message.prompt, 9, "en-US");
+            input.dispatchEvent(textEvent);
+          } catch (e) {}
 
-        // Fallback: doğrudan içerik ata
-        if (!input.textContent || input.textContent.length < 10) {
-          input.textContent = message.prompt;
-          input.dispatchEvent(new Event('input', { bubbles: true }));
+          // Fallback
+          if (!input.textContent || input.textContent.length < 10) {
+            input.textContent = message.prompt;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+          }
         }
       } else if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
         input.focus();
