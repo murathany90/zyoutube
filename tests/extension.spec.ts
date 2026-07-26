@@ -31,6 +31,11 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
     extensionId = extensionUrl.split('/')[2];
     console.log(`Extension loaded with ID: ${extensionId}`);
     
+    // Ensure panelEnabled is true for tests
+    await background.evaluate(() => new Promise<void>(resolve => {
+      chrome.storage.local.set({ panelEnabled: true }, resolve);
+    }));
+    
     // Quick ping to SW to ensure it's alive (check for errors)
     const errs: string[] = [];
     background.on('pageerror', err => errs.push(err.message));
@@ -105,17 +110,16 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
 
     await page.goto('https://www.youtube.com/watch?v=fixtureVideoId');
 
-    // Buton enjekte edildi mi?
-    const button = page.locator('#zyoutube-toggle-button');
-    await expect(button).toBeVisible({ timeout: 5000 });
-    
-    // Panel otomatik açılmış olmalı (varsayılan ayar) veya butona basarak açılır
-    // Panel açıldı mı?
+    // Panel should auto-open (no toggle button)
     const panel = page.locator('#zyoutube-panel-host');
-    await expect(panel).toBeVisible({ timeout: 5000 });
+    await expect(panel).toBeVisible({ timeout: 8000 });
     // Verify Shadow Root exists
     const hasShadowRoot = await panel.evaluate(el => Boolean(el.shadowRoot));
     expect(hasShadowRoot).toBe(true);
+    
+    // Verify no toggle button exists
+    const toggleButton = page.locator('#zyoutube-toggle-button');
+    await expect(toggleButton).not.toBeVisible();
 
     // Transkript sekmesine geçiş
     const transcriptTabBtn = page.getByRole('button', { name: 'Transkript' });
@@ -144,5 +148,9 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
        return nodes.filter(n => n.textContent && n.textContent.includes('Virtual Segment ') && n.children.length === 0).length;
     });
     expect(segmentCountAfterSearch).toBeLessThan(200);
+
+    // Verify only one panel exists
+    const panelCount = await page.evaluate(() => document.querySelectorAll('#zyoutube-panel-host').length);
+    expect(panelCount).toBe(1);
   });
 });

@@ -65,14 +65,15 @@ const Popup = () => {
     showSaved();
   };
 
-  const savePanel = async (newPanel: PanelSettings) => {
-    await GemSettingsService.savePanelSettings(newPanel);
-    setPanelSettings(newPanel);
+  const togglePanelEnabled = async (enabled: boolean) => {
+    await chrome.storage.local.set({ panelEnabled: enabled });
+    setPanelSettings(prev => ({ ...prev, enabled }));
     showSaved();
-    // Toggle değişimini açık YouTube sekmelerine yayınla
+    // Broadcast to all YouTube tabs
+    const msgType = enabled ? 'START_EXTENSION' : 'STOP_EXTENSION';
     chrome.tabs?.query({ url: 'https://*.youtube.com/*' }, (tabs) => {
       tabs.forEach(tab => {
-        if (tab.id) chrome.tabs.sendMessage(tab.id, { type: 'PANEL_SETTINGS_CHANGED' }).catch(() => {});
+        if (tab.id) chrome.tabs.sendMessage(tab.id, { type: msgType }).catch(() => {});
       });
     });
   };
@@ -193,9 +194,10 @@ const Popup = () => {
           <div>
             <div style={sectionTitle}>Panel Ayarları</div>
             <div style={{ background: 'var(--zy-card-bg, #fff)', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px' }}>
-              <Toggle label="YouTube paneli aktif" checked={panelSettings.enabled} onChange={v => savePanel({ ...panelSettings, enabled: v })} />
-              <Toggle label="Watch sayfasında otomatik göster" checked={panelSettings.autoOpenOnWatchPage}
-                onChange={v => savePanel({ ...panelSettings, autoOpenOnWatchPage: v })} />
+              <Toggle label="Eklenti Aktif" checked={panelSettings.enabled} onChange={v => togglePanelEnabled(v)} />
+              <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
+                Panel, YouTube watch sayfalarında otomatik olarak görünür. Kontrol yalnızca bu anahtarla yapılır.
+              </div>
             </div>
 
             <div style={sectionTitle}>Özet Ayarları</div>

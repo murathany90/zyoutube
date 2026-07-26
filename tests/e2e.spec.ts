@@ -8,6 +8,7 @@ const __dirname = path.dirname(__filename);
 test.describe('YouTube AI Summary Extension e2e (Fixture based)', () => {
   let browserContext: BrowserContext;
   let page: Page;
+  let extensionId: string;
 
   test.beforeAll(async () => {
     const extensionPath = path.resolve(__dirname, '../dist');
@@ -19,6 +20,18 @@ test.describe('YouTube AI Summary Extension e2e (Fixture based)', () => {
         `--load-extension=${extensionPath}`,
       ],
     });
+
+    // Get extension ID
+    let [background] = browserContext.serviceWorkers();
+    if (!background) {
+      background = await browserContext.waitForEvent('serviceworker');
+    }
+    extensionId = background.url().split('/')[2];
+    
+    // Ensure panelEnabled is true for tests
+    await background.evaluate(() => new Promise<void>(resolve => {
+      chrome.storage.local.set({ panelEnabled: true }, resolve);
+    }));
   });
 
   test.afterAll(async () => {
@@ -79,25 +92,18 @@ test.describe('YouTube AI Summary Extension e2e (Fixture based)', () => {
 
     await page.goto('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
     
-    // Check if the button is injected
-    const button = page.locator('#zyoutube-toggle-button');
-    try {
-      await expect(button).toBeVisible({ timeout: 5000 });
-    } catch (e) {
-      console.log("Button not found. HTML Dump:", await page.innerHTML('body'));
-      throw e;
-    }
-    
-    // Open the panel if not open
+    // Panel should auto-open (no button needed)
     const panel = page.locator('#zyoutube-panel-host');
-    const isPanelVisible = await panel.isVisible();
-    if (!isPanelVisible) {
-      await button.click();
-      await expect(panel).toBeVisible({ timeout: 5000 });
-    }
+    await expect(panel).toBeVisible({ timeout: 8000 });
+    
+    // Verify no toggle button in DOM
+    const toggleButton = page.locator('#zyoutube-toggle-button');
+    await expect(toggleButton).not.toBeVisible();
+    
     // Verify Shadow Root exists
     const hasShadowRoot = await panel.evaluate(el => Boolean(el.shadowRoot));
     expect(hasShadowRoot).toBe(true);
+    
     // Switch to Transcript tab
     const transcriptTabBtn = page.getByRole('button', { name: 'Transkript' });
     await expect(transcriptTabBtn).toBeVisible();
@@ -126,5 +132,9 @@ test.describe('YouTube AI Summary Extension e2e (Fixture based)', () => {
     // Uncheck exact match
     await exactMatchCheckbox.uncheck();
     await expect(page.locator('text=2 sonuç bulundu.')).toBeVisible();
+
+    // Verify only one panel
+    const panels = await page.evaluate(() => document.querySelectorAll('#zyoutube-panel-host').length);
+    expect(panels).toBe(1);
   });
 });

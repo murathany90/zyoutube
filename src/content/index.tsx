@@ -3,9 +3,10 @@ import { createRoot, Root } from 'react-dom/client';
 import panelCss from '../styles/content-panel.css?inline';
 import { TranscriptTab } from './TranscriptTab';
 import { SummaryTab } from './components/SummaryTab';
-import { GemSettingsService } from '../gem/settings';
 import { PanelSettings } from '../gem/types';
 import { sendRuntimeMessage, RuntimeMessengerError } from './runtime-messenger';
+
+const PANEL_ENABLED_KEY = 'panelEnabled';
 
 // ============================================================================
 // COMPONENT: EXTENSION INVALIDATED
@@ -34,11 +35,11 @@ const ExtensionInvalidated = () => (
 );
 
 // ============================================================================
-// MAIN PANEL COMPONENT
+// MAIN PANEL COMPONENT (no close button)
 // ============================================================================
 type PanelTab = 'summary' | 'transcript' | 'keyideas' | 'ask' | 'learn';
 
-const Panel = ({ videoId, onClose, isInvalidated }: { videoId: string; onClose: () => void, isInvalidated: boolean }) => {
+const Panel = ({ videoId, isInvalidated }: { videoId: string; isInvalidated: boolean }) => {
   const [activeTab, setActiveTab] = useState<PanelTab>('summary');
   const title = document.querySelector('h1.ytd-watch-metadata')?.textContent?.trim() || 'Bilinmeyen Video';
   const url = window.location.href;
@@ -71,7 +72,7 @@ const Panel = ({ videoId, onClose, isInvalidated }: { videoId: string; onClose: 
       marginBottom: '16px',
       boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
     }}>
-      {/* Fixed header */}
+      {/* Fixed header (no close button) */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -88,10 +89,6 @@ const Panel = ({ videoId, onClose, isInvalidated }: { videoId: string; onClose: 
           </svg>
           ZYouTube AI
         </h2>
-        <button onClick={onClose}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', color: '#9ca3af', fontSize: '16px' }}
-          title="Paneli Gizle"
-        >✕</button>
       </div>
 
       {isInvalidated ? (
@@ -149,17 +146,15 @@ const Panel = ({ videoId, onClose, isInvalidated }: { videoId: string; onClose: 
 };
 
 // ============================================================================
-// CONTROLLER: YOUTUBE CONTENT LIFECYCLE
+// PANEL MANAGER (no toggle button, controlled by panelEnabled storage)
 // ============================================================================
 
 const BUILD_ID = chrome.runtime?.getManifest?.()?.version || 'unknown';
 
-class YouTubeContentController {
+class YouTubePanelManager {
   private panelRoot: Root | null = null;
   private currentVideoId: string = '';
-  private panelHiddenForTab: boolean = false;
   private isInvalidated: boolean = false;
-  private observer: MutationObserver | null = null;
   private bootstrapObserver: MutationObserver | null = null;
   private storageListener: ((changes: any, areaName: string) => void) | null = null;
   private messageListener: ((message: any, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => void) | null = null;
@@ -171,7 +166,7 @@ class YouTubeContentController {
   // Persistent resources (kept across navigation)
   private persistentTimeouts = new Set<number>();
 
-
+  private _panelEnabled: boolean = true;
 
   constructor() {
     this.cleanupOldInstances();
@@ -183,17 +178,6 @@ class YouTubeContentController {
         el.remove();
       }
     });
-  }
-
-  private setNavInterval(handler: TimerHandler, timeout?: number): number {
-    const id = window.setInterval(handler, timeout);
-    this.navIntervals.add(id);
-    return id;
-  }
-
-  private clearNavInterval(id: number) {
-    window.clearInterval(id);
-    this.navIntervals.delete(id);
   }
 
   private getVideoId(): string | null {
@@ -251,14 +235,9 @@ class YouTubeContentController {
       this.bootstrapObserver.disconnect();
       this.bootstrapObserver = null;
     }
-    if (this.observer) {
-      this.observer.disconnect();
-      this.observer = null;
-    }
     this.renderPanel(this.currentVideoId);
   }
 
-  // Clean up navigation-scoped resources only (intervals, timeouts, bootstrap observer)
   private clearNavigationResources() {
     this.navIntervals.forEach(id => window.clearInterval(id));
     this.navTimeouts.forEach(id => window.clearTimeout(id));
@@ -270,14 +249,13 @@ class YouTubeContentController {
     }
   }
 
-  // Full reset for SPA navigation: keeps persistent listeners, resets video state
-  private resetForNavigation(newVideoId: string) {
-    this.clearNavigationResources();
-    this.currentVideoId = newVideoId;
-
-    // Update existing panel host content if it exists, or it will be created by init()
-    if (document.getElementById('zyoutube-panel-host')) {
-      this.renderPanel(newVideoId);
+  private async readPanelEnabled(): Promise<boolean> {
+    try {
+      const data = await chrome.storage.local.get(PANEL_ENABLED_KEY);
+      if (data[PANEL_ENABLED_KEY] === undefined) return true;
+      return data[PANEL_ENABLED_KEY] === true;
+    } catch {
+      return true;
     }
   }
 
@@ -338,7 +316,6 @@ class YouTubeContentController {
 
     this.panelRoot = createRoot(reactRoot);
     this.currentVideoId = videoId;
-    this.panelHiddenForTab = false;
     this.renderPanel(videoId);
 
     return true;
@@ -350,11 +327,6 @@ class YouTubeContentController {
       <Panel
         videoId={videoId}
         isInvalidated={this.isInvalidated}
-        onClose={() => {
-          this.panelHiddenForTab = true;
-          this.unmountPanel();
-          this.updateButtonState();
-        }}
       />
     );
   }
@@ -370,121 +342,6 @@ class YouTubeContentController {
     }
   }
 
-  private injectButton(): boolean {
-    const actionsRow = document.querySelector('#top-level-buttons-computed') || document.querySelector('ytd-menu-renderer #top-level-buttons') || document.querySelector('#actions-inner');
-    if (!actionsRow) return false;
-
-    if (document.getElementById('zyoutube-toggle-button')) return true;
-
-    const btn = document.createElement('button');
-    btn.id = 'zyoutube-toggle-button';
-    btn.className = 'zyoutube-toggle-button';
-    btn.setAttribute('data-zyoutube-owner', 'extension');
-    btn.setAttribute('data-zyoutube-build', BUILD_ID);
-    btn.innerHTML = `
-      <span class="zyoutube-toggle-icon">
-        <svg height="24" viewBox="0 0 24 24" width="24" focusable="false" style="pointer-events: none; display: block; width: 24px; height: 24px;">
-          <path d="M12 2L9.19 8.63L2 9.24L7.65 13.97L5.82 21L12 17.27L18.18 21L16.35 13.97L22 9.24L14.81 8.63L12 2Z" fill="currentColor"></path>
-        </svg>
-      </span>
-      <span class="zyoutube-toggle-label">AI Özet</span>
-    `;
-
-    btn.addEventListener('click', () => {
-      console.warn('ZYouTube: Button clicked. isInvalidated:', this.isInvalidated, 'panelHidden:', this.panelHiddenForTab);
-      if (this.isInvalidated) {
-        alert('ZYouTube: Eklenti güncellendiği için sayfanın yenilenmesi gerekiyor. Lütfen sayfayı yenileyin (F5).');
-        return;
-      }
-      if (this.panelHiddenForTab) {
-        this.panelHiddenForTab = false;
-        const vid = this.getVideoId();
-        if (vid) {
-          this.mountPanel(vid);
-        }
-      } else if (document.getElementById('zyoutube-panel-host')) {
-        this.panelHiddenForTab = true;
-        this.unmountPanel();
-      } else {
-        this.panelHiddenForTab = false;
-        const vid = this.getVideoId();
-        if (vid) {
-          this.mountPanel(vid);
-        }
-      }
-      this.updateButtonState();
-    });
-
-    // Inject scoped button styles (only if not already present)
-    if (!document.getElementById('zyoutube-toggle-styles')) {
-      const styleEl = document.createElement('style');
-      styleEl.id = 'zyoutube-toggle-styles';
-      styleEl.textContent = `
-        .zyoutube-toggle-button {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          margin-left: 8px;
-          padding: 0 12px;
-          height: 36px;
-          border: none;
-          border-radius: 18px;
-          background: #f2f2f2;
-          color: #0f0f0f;
-          font-family: 'YouTube Sans', Roboto, Arial, sans-serif;
-          font-size: 14px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: background 0.15s, opacity 0.15s;
-          white-space: nowrap;
-          flex-shrink: 0;
-        }
-        .zyoutube-toggle-button:hover {
-          background: #d9d9d9;
-        }
-        .zyoutube-toggle-button:active {
-          background: #c7c7c7;
-        }
-        .zyoutube-toggle-button[disabled] {
-          opacity: 0.5;
-          cursor: not-allowed;
-        }
-        .zyoutube-toggle-icon {
-          display: inline-flex;
-          align-items: center;
-          width: 24px;
-          height: 24px;
-          flex-shrink: 0;
-        }
-        .zyoutube-toggle-label {
-          display: inline-flex;
-          align-items: center;
-        }
-      `;
-      document.head.appendChild(styleEl);
-    }
-
-    if (actionsRow.firstChild) {
-      actionsRow.insertBefore(btn, actionsRow.firstChild);
-    } else {
-      actionsRow.appendChild(btn);
-    }
-    return true;
-  }
-
-  private updateButtonState() {
-    const btn = document.getElementById('zyoutube-toggle-button');
-    if (!btn) return;
-    const textEl = btn.querySelector('.zyoutube-toggle-label');
-    if (!textEl) return;
-
-    const hasPanel = !!document.getElementById('zyoutube-panel-host');
-    const newText = hasPanel ? 'Paneli Gizle' : 'AI Özet';
-    if (textEl.textContent !== newText) {
-      textEl.textContent = newText;
-    }
-  }
-
   private setupBootstrapObserver() {
     if (this.bootstrapObserver) return;
 
@@ -492,9 +349,8 @@ class YouTubeContentController {
 
     this.bootstrapObserver = new MutationObserver(() => {
       const secondaryFound = !!document.querySelector('#secondary') || !!document.querySelector('#secondary-inner');
-      const buttonRowFound = !!document.querySelector('#top-level-buttons-computed');
 
-      if (secondaryFound && buttonRowFound) {
+      if (secondaryFound) {
         this.bootstrapObserver?.disconnect();
         this.bootstrapObserver = null;
         this.init();
@@ -519,55 +375,48 @@ class YouTubeContentController {
     const videoId = this.getVideoId();
     if (!videoId) return;
 
-    // If video changed, reset navigation-scoped resources
+    // If video changed, reset navigation-scoped resources (panel stays mounted)
     if (videoId !== this.currentVideoId && this.currentVideoId !== '') {
-      this.resetForNavigation(videoId);
+      this.clearNavigationResources();
+      this.currentVideoId = videoId;
+      this.renderPanel(videoId);
+      return;
     }
 
     try {
-      const pingOk = await this.pingBackground();
-      if (!pingOk && this.isInvalidated) return;
+      this._panelEnabled = await this.readPanelEnabled();
 
-      const panelSettings = await GemSettingsService.getPanelSettings();
-
-      if (!panelSettings.enabled) {
+      if (!this._panelEnabled) {
         this.unmountPanel();
-        const btn = document.getElementById('zyoutube-toggle-button');
-        if (btn) {
-          const textEl = btn.querySelector('.zyoutube-toggle-label');
-          if (textEl) textEl.textContent = 'Pasif';
-          btn.setAttribute('disabled', 'true');
-          btn.style.opacity = '0.5';
-        }
         return;
       }
 
-      // Inject button with bounded retry
-      let buttonRetries = 0;
-      const btnInterval = this.setNavInterval(() => {
-        if (this.injectButton() || buttonRetries > 10) {
-          this.clearNavInterval(btnInterval);
-          this.updateButtonState();
-        }
-        buttonRetries++;
-      }, 1000);
+      const pingOk = await this.pingBackground();
+      if (!pingOk && this.isInvalidated) return;
 
-      // Mount panel if auto-open is enabled
-      if (panelSettings.autoOpenOnWatchPage && !this.panelHiddenForTab) {
-        if (!document.getElementById('zyoutube-panel-host')) {
-          let mountRetries = 0;
-          const mountInterval = this.setNavInterval(() => {
-            if (this.mountPanel(videoId) || mountRetries > 10) {
-              this.clearNavInterval(mountInterval);
-              this.updateButtonState();
-            }
-            mountRetries++;
-          }, 800);
-        }
+      if (!document.getElementById('zyoutube-panel-host')) {
+        let mountRetries = 0;
+        const mountInterval = this.setNavInterval(() => {
+          if (this.mountPanel(videoId) || mountRetries > 10) {
+            this.clearNavInterval(mountInterval);
+          }
+          mountRetries++;
+        }, 800);
       }
     } catch (err) {
-      console.error('INIT ERROR', err);
+      console.error('ZYouTube INIT ERROR', err);
     }
+  }
+
+  private setNavInterval(handler: TimerHandler, timeout?: number): number {
+    const id = window.setInterval(handler, timeout);
+    this.navIntervals.add(id);
+    return id;
+  }
+
+  private clearNavInterval(id: number) {
+    window.clearInterval(id);
+    this.navIntervals.delete(id);
   }
 
   public start() {
@@ -576,9 +425,12 @@ class YouTubeContentController {
 
     this.messageListener = (message, _sender, sendResponse) => {
       if (message.type === 'YOUTUBE_URL_CHANGED') {
-        this.panelHiddenForTab = false;
         this.init();
       } else if (message.type === 'PANEL_SETTINGS_CHANGED') {
+        this.init();
+      } else if (message.type === 'STOP_EXTENSION') {
+        this.unmountPanel();
+      } else if (message.type === 'START_EXTENSION') {
         this.init();
       } else if (message.type === 'COPY_TO_CLIPBOARD') {
         navigator.clipboard.writeText(message.text).catch(err => console.error('Panoya kopyalanamadı', err));
@@ -589,32 +441,41 @@ class YouTubeContentController {
 
     if (typeof chrome !== 'undefined' && chrome.storage) {
       this.storageListener = (changes, area) => {
-        if (area === 'local' && changes['panel_settings']) {
-          const newSettings = changes['panel_settings'].newValue as PanelSettings;
-          if (!newSettings?.enabled) {
-            this.unmountPanel();
-            this.updateButtonState();
-          } else {
-            this.panelHiddenForTab = false;
-            this.init();
+        if (area === 'local') {
+          if (changes[PANEL_ENABLED_KEY] !== undefined) {
+            const enabled = changes[PANEL_ENABLED_KEY].newValue;
+            if (enabled === false) {
+              this.unmountPanel();
+            } else {
+              this.init();
+            }
+          }
+          // Backward compat with old panel_settings
+          if (changes['panel_settings']) {
+            const newSettings = changes['panel_settings'].newValue as PanelSettings;
+            if (!newSettings?.enabled) {
+              this.unmountPanel();
+            } else {
+              this.init();
+            }
           }
         }
       };
       chrome.storage.onChanged.addListener(this.storageListener);
     }
 
-    // Persistent observer for secondary re-attach (only after bootstrap done)
+    // Persistent observer for secondary re-attach
     this.persistentTimeouts.add(window.setTimeout(() => {
       const secondaryTarget = document.querySelector('#secondary');
       if (!secondaryTarget) {
-        this.observer = new MutationObserver(() => {
+        const observer = new MutationObserver(() => {
           const sec = document.querySelector('#secondary');
           if (sec && !document.getElementById('zyoutube-panel-host')) {
             const vid = this.getVideoId();
             if (vid) this.mountPanel(vid);
           }
         });
-        this.observer.observe(document.body, { childList: true, subtree: true });
+        observer.observe(document.body, { childList: true, subtree: true });
       }
     }, 10000));
   }
@@ -632,10 +493,6 @@ class YouTubeContentController {
       this.bootstrapObserver.disconnect();
       this.bootstrapObserver = null;
     }
-    if (this.observer) {
-      this.observer.disconnect();
-      this.observer = null;
-    }
 
     if (this.messageListener) {
       chrome.runtime.onMessage.removeListener(this.messageListener);
@@ -645,10 +502,6 @@ class YouTubeContentController {
     }
 
     this.unmountPanel();
-    const btn = document.getElementById('zyoutube-toggle-button');
-    if (btn) btn.remove();
-    const styleEl = document.getElementById('zyoutube-toggle-styles');
-    if (styleEl) styleEl.remove();
   }
 }
 
@@ -656,16 +509,15 @@ class YouTubeContentController {
 // BOOTSTRAP
 // ============================================================================
 
-// Eğer bu script önceden enjekte edildiyse eski controller'ı yok et
 if ((window as any).__zyoutube_controller__) {
   try {
     (window as any).__zyoutube_controller__.destroy();
   } catch (e) {}
 }
 
-const controller = new YouTubeContentController();
-(window as any).__zyoutube_controller__ = controller;
+const manager = new YouTubePanelManager();
+(window as any).__zyoutube_controller__ = manager;
 
 if (window.location.href.includes('youtube.com/watch') || window.location.href.includes('localhost:3000')) {
-  controller.start();
+  manager.start();
 }
