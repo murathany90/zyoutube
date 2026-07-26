@@ -64,6 +64,7 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
       setError(null);
       setResult(null);
       setTracks([]);
+      setSelectedTrackUrl(''); // Yeni video için url'yi sıfırla
       
       try {
         const availableTracks = await providerRef.current.getAvailableTracks(videoId);

@@ -170,31 +170,23 @@ function isStreamingActive(): boolean {
 async function waitForResponse(timeoutMs: number = 120000): Promise<string | null> {
   const startTime = Date.now();
   
-  // Önce Gemini'nin yanıt vermeye veya düşünmeye başlaması için 1-2 saniye fırsat verelim
-  // Bu eski yanıtı yanlışlıkla okumamak için önemli.
-  await new Promise(r => setTimeout(r, 2000));
+  // İstek üzerine tam olarak bu mantık: "4 saniye beklesin"
+  await new Promise(r => setTimeout(r, 4000));
 
   let lastContent = '';
-  let stableCount = 0;
-  const STABLE_THRESHOLD = 3; // 3 kez (3 saniye) boyunca metin hiç değişmezse bittiğini anla
-  const CHECK_INTERVAL = 1000; // Saniyede 1 kontrol et (Çok hızlı tepki süresi)
+  const CHECK_INTERVAL = 3000; // "her 3 saniyede bir kontrol etsin"
 
   while (Date.now() - startTime < timeoutMs) {
     const streaming = isStreamingActive();
     const currentContent = getLatestResponse() || '';
 
-    // Eğer yazma işlemi bittiyse ve ekranda metin varsa
-    if (!streaming && currentContent.length > 50) {
-      if (currentContent === lastContent) {
-        stableCount++;
-        if (stableCount >= STABLE_THRESHOLD) {
-          return currentContent;
-        }
-      } else {
-        stableCount = 0;
+    // "bitirmişmi cevabı"
+    // (Metin uzunluğu 50'den büyükse ve artık streaming bittiyse VEYA metin hiç değişmiyorsa)
+    if (currentContent.length > 50) {
+      if (!streaming || currentContent === lastContent) {
+        // "sonra hemen eklenti özet kartına yazsın" (Anında return et)
+        return currentContent;
       }
-    } else {
-      stableCount = 0;
     }
 
     lastContent = currentContent;

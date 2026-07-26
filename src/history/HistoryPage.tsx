@@ -110,11 +110,45 @@ export const HistoryPage = () => {
           <div style={{ backgroundColor: 'var(--zy-card-inner, rgba(0,0,0,0.03))', padding: '20px', borderRadius: '8px', border: '1px solid var(--zy-border, rgba(0,0,0,0.06))', marginBottom: '24px' }}>
             <h3 style={{ fontWeight: 700, fontSize: '18px', margin: '0 0 16px 0' }}>Genel Özet</h3>
             {(isDual || hasTr) && (
-              <div className="zy-markdown-body" style={{ lineHeight: '1.7', color: 'var(--zy-text, #374151)' }} dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(result.summary.tr || result.summary.en || '') }} />
+              <div 
+                className="zy-markdown-body" 
+                style={{ lineHeight: '1.7', color: 'var(--zy-text, #374151)' }} 
+                dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(result.summary.tr || result.summary.en || '') }} 
+                onClick={(e) => {
+                  const target = e.target as HTMLElement;
+                  if (target.classList.contains('zy-timestamp-link')) {
+                    const timeStr = target.getAttribute('data-time');
+                    if (timeStr) {
+                      const parts = timeStr.split(':').map(Number);
+                      let seconds = 0;
+                      if (parts.length === 3) seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+                      else if (parts.length === 2) seconds = parts[0] * 60 + parts[1];
+                      handleTimeClick(seconds * 1000);
+                    }
+                  }
+                }}
+              />
             )}
             {isDual && <hr style={{ border: 'none', borderTop: '1px solid rgba(0,0,0,0.06)', margin: '16px 0' }} />}
             {(isDual || !hasTr) && (
-               <div className="zy-markdown-body" style={{ lineHeight: '1.7', color: 'var(--zy-text, #374151)' }} dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(result.summary.en || result.summary.tr || '') }} />
+               <div 
+                 className="zy-markdown-body" 
+                 style={{ lineHeight: '1.7', color: 'var(--zy-text, #374151)' }} 
+                 dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(result.summary.en || result.summary.tr || '') }} 
+                 onClick={(e) => {
+                   const target = e.target as HTMLElement;
+                   if (target.classList.contains('zy-timestamp-link')) {
+                     const timeStr = target.getAttribute('data-time');
+                     if (timeStr) {
+                       const parts = timeStr.split(':').map(Number);
+                       let seconds = 0;
+                       if (parts.length === 3) seconds = parts[0] * 3600 + parts[1] * 60 + parts[2];
+                       else if (parts.length === 2) seconds = parts[0] * 60 + parts[1];
+                       handleTimeClick(seconds * 1000);
+                     }
+                   }
+                 }}
+               />
             )}
           </div>
 

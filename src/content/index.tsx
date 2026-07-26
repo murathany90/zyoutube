@@ -433,6 +433,11 @@ class YouTubePanelManager {
     this.init();
     this.setupBootstrapObserver();
 
+    // YouTube SPA navigasyonunu dinle
+    document.addEventListener('yt-navigate-finish', () => {
+      this.init();
+    });
+
     this.messageListener = (message, _sender, sendResponse) => {
       if (message.type === 'YOUTUBE_URL_CHANGED') {
         this.init();

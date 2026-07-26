@@ -95,6 +95,9 @@ export function renderSimpleMarkdown(text: string): string {
 
 /** Apply inline formatting (bold, italic, inline code) */
 function applyInline(text: string): string {
+  // Zaman damgalarını (Örn: [0:00], 15:19, 1:23:45) tıklanabilir bağlantılara çevir
+  text = text.replace(/\[?\b(\d{1,2}:\d{2}(?::\d{2})?)\b\]?/g, '<span class="zy-timestamp-link" data-time="$1" style="color: #3b82f6; cursor: pointer; text-decoration: underline; font-weight: 600;">$&</span>');
+
   // Inline code
   text = text.replace(/`([^`]+)`/g, '<code class="zy-inline-code">$1</code>');
   // Bold
