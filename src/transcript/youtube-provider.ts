@@ -2,7 +2,7 @@ import { ITranscriptProvider, CaptionTrack, TranscriptResult, TranscriptError } 
 import { parseTranscript } from './parser';
 import { evaluateQuality } from './quality';
 import { getPlayerResponseFromMainWorld } from '../content/bridge';
-import { sendRuntimeMessage, RuntimeMessengerError } from '../content/runtime-messenger';
+import { RuntimeMessengerError } from '../content/runtime-messenger';
 
 export class YouTubeTranscriptProvider implements ITranscriptProvider {
   
@@ -206,46 +206,69 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
     });
   }
 
+  private validateCaptionUrl(urlStr: string): string {
+    let url: URL;
+    try {
+      url = new URL(urlStr);
+    } catch {
+      throw new Error('INVALID_URL');
+    }
+
+    const hostname = url.hostname.toLowerCase();
+    const isAllowed = hostname === 'www.youtube.com' || hostname === 'youtube.com' ||
+      hostname.endsWith('.youtube.com') || hostname === 'googlevideo.com' ||
+      hostname.endsWith('.googlevideo.com') || hostname === 'localhost' || hostname === '127.0.0.1';
+
+    if (!isAllowed) {
+      throw new Error('HOST_NOT_ALLOWED');
+    }
+
+    if (hostname !== 'localhost' && hostname !== '127.0.0.1' && url.protocol !== 'https:') {
+      throw new Error('HTTPS_REQUIRED');
+    }
+
+    if (url.username || url.password) {
+      throw new Error('CREDENTIALS_IN_URL');
+    }
+
+    return url.origin + url.pathname + url.search;
+  }
+
   async fetchTranscript(videoId: string, track: CaptionTrack, abortController?: AbortController): Promise<TranscriptResult> {
+    const fetchUrl = track.baseUrl + (track.baseUrl.includes('?') ? '&fmt=json3' : '?fmt=json3');
     let rawText: string;
     try {
-      const response = await sendRuntimeMessage<any, { success: boolean; data?: { rawText: string; format: string }; error?: string; code?: string }>(
-        {
-          type: 'FETCH_CAPTION',
-          requestId: `fetch_${Date.now()}`,
-          videoId,
-          track: { baseUrl: track.baseUrl, languageCode: track.languageCode, kind: track.kind },
-          format: 'json3'
-        },
-        {
-          timeoutMs: 20000,
-          signal: abortController?.signal
-        }
-      );
+      const safeUrl = this.validateCaptionUrl(fetchUrl);
 
-      if (!response.success || !response.data) {
-        const errorCode = response.code || response.error || 'UNKNOWN';
-        if (errorCode === 'CAPTION_URL_REJECTED' || errorCode === 'HOST_NOT_ALLOWED') {
-          throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı URL\'si güvenlik nedeniyle reddedildi.', {
-            expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode
-          });
-        }
-        throw new TranscriptError('CAPTION_FETCH_FAILED', `Altyazı alınamadı: ${response.error || 'Bilinmeyen hata'}`, {
-          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode
+      const response = await fetch(safeUrl, {
+        signal: abortController?.signal
+      });
+
+      if (!response.ok) {
+        throw new TranscriptError('CAPTION_FETCH_FAILED', `Altyazı alınamadı: HTTP ${response.status}`, {
+          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: `HTTP_${response.status}`
         });
       }
 
-      rawText = response.data.rawText;
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('text/html')) {
+        throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı alınamadı: CAPTION_RESPONSE_HTML', {
+          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'HTML_REJECTED'
+        });
+      }
+
+      rawText = await response.text();
+
+      if (!rawText || !rawText.trim()) {
+        throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı sunucudan boş döndü.', {
+          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'EMPTY_BODY'
+        });
+      }
     } catch (e: any) {
       if (e instanceof TranscriptError) throw e;
-      if (e instanceof RuntimeMessengerError) {
-        if (e.code === 'BACKGROUND_TIMEOUT') {
-          throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı isteği zaman aşımına uğradı.', {
-            expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'FETCH_TIMEOUT'
-          });
-        }
-        throw new TranscriptError('CAPTION_FETCH_FAILED', `Arka plan servisi hatası: ${e.message}`, {
-          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: e.code
+      if (e.name === 'AbortError') {
+        throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı isteği iptal edildi.', {
+          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'FETCH_ABORTED'
         });
       }
       throw new TranscriptError('CAPTION_FETCH_FAILED', `Altyazı dosyası indirilemedi: ${e.message}`, {
