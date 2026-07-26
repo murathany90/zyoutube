@@ -1,13 +1,15 @@
 import { SummaryRequest } from '../ai/types';
 import { AITaskManager } from '../ai/task-manager';
 import { GemSettingsService } from '../gem/settings';
+import { captureNativeYouTubeCaption } from './native-caption-broker';
 
 export type ExtensionMessage =
   | { type: 'YOUTUBE_URL_CHANGED'; url: string }
   | { type: 'GET_PLAYER_RESPONSE'; requestId: string; expectedVideoId: string }
   | { type: 'FETCH_CAPTION'; requestId: string; videoId: string; track: { baseUrl: string; languageCode: string; kind?: string }; format: 'json3' | 'xml' }
   | { type: 'FETCH_CAPTION_FROM_MAIN'; requestId: string; videoId: string; track: CaptionTrackMessage; format: string }
-  | { type: 'FETCH_TRANSCRIPT_PANEL'; requestId: string; videoId: string }
+  | { type: 'FETCH_TRANSCRIPT_PANEL'; requestId: string; videoId: string; tlang?: string; trackLang?: string }
+  | { type: 'CAPTURE_NATIVE_CAPTION'; requestId: string; videoId: string; sourceLanguage: string; sourceKind?: string; targetLanguage?: string }
   | { type: 'START_SUMMARY'; request: SummaryRequest }
   | { type: 'CANCEL_SUMMARY'; taskId: string }
   | { type: 'GET_PANEL_SETTINGS' }
@@ -155,6 +157,24 @@ export function setupMessageRouter() {
     // 10. FETCH_TRANSCRIPT_PANEL - scrape YouTube's visible transcript panel via MAIN world
     if (message.type === 'FETCH_TRANSCRIPT_PANEL') {
       handleTranscriptPanel(message, sendResponse, sender);
+      return true;
+    }
+
+    // 11. CAPTURE_NATIVE_CAPTION - intercept native timedtext request
+    if (message.type === 'CAPTURE_NATIVE_CAPTION') {
+      const tabId = sender.tab?.id;
+      if (!tabId) {
+        sendResponse({ success: false, error: 'NO_TAB' });
+        return true;
+      }
+      captureNativeYouTubeCaption(tabId, {
+        videoId: message.videoId,
+        sourceLanguage: message.sourceLanguage,
+        sourceKind: message.sourceKind,
+        targetLanguage: message.targetLanguage
+      }).then(sendResponse).catch(e => {
+        sendResponse({ success: false, error: e.message || 'NATIVE_CAPTURE_FAILED' });
+      });
       return true;
     }
 
@@ -312,7 +332,7 @@ async function fetchCaptionFromMainWorldInjected(captionUrl: string, format: str
   }
 }
 
-async function scrapeTranscriptPanelInjected(hideNativeTranscript: boolean = true, tlang?: string): Promise<{ success: boolean; segments?: Array<{ startTimeMs: number; endTimeMs: number; durationMs: number; text: string; languageCode: string }>; error?: string }> {
+async function scrapeTranscriptPanelInjected(hideNativeTranscript: boolean = true, tlang?: string | null, trackLang?: string | null): Promise<{ success: boolean; segments?: Array<{ startTimeMs: number; endTimeMs: number; durationMs: number; text: string; languageCode: string }>; error?: string }> {
   const _log: string[] = [];
   const _w = (m: string) => { _log.push(m); console.log('ZYouTube Scrape:', m); };
 
@@ -328,33 +348,12 @@ async function scrapeTranscriptPanelInjected(hideNativeTranscript: boolean = tru
     _w('Starting scraping...');
     let weOpenedIt = false;
 
-    // Trigger auto-translate if tlang is provided
-    if (tlang) {
-      _w('Attempting to set player translation to: ' + tlang);
-      try {
-        const player = document.getElementById('movie_player') as any;
-        if (player && typeof player.setOption === 'function' && typeof player.getOption === 'function') {
-          const currentTrack = player.getOption('captions', 'track');
-          const originalLang = currentTrack ? currentTrack.languageCode : 'tr';
-          player.toggleSubtitlesOn();
-          player.setOption('captions', 'track', { languageCode: originalLang, translationLanguage: { languageCode: tlang } });
-          _w('Player option set for translation');
-          // Wait for DOM to update
-          await new Promise(r => setTimeout(r, 1000));
-        } else {
-          _w('Player API not available');
-        }
-      } catch (e: any) {
-        _w('Failed to set player translation: ' + e.message);
-      }
-    }
-
     // Step 1: Read already open native segments
     let segmentsNodes = getSegments();
     
-    // If tlang is provided and panel is already open, close it so we can re-open it to apply translation
-    if (segmentsNodes.length > 0 && tlang) {
-      _w('Panel already open but tlang requested. Closing panel to force refresh...');
+    // If tlang or trackLang is provided and panel is already open, close it so we can re-open it to apply language
+    if (segmentsNodes.length > 0 && (tlang || trackLang)) {
+      _w('Panel already open. Closing panel to force refresh or change language...');
       const closeBtn = document.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"] #visibility-button button, ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"] button[aria-label*="Close" i], ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"] button[aria-label*="kapat" i]');
       if (closeBtn) {
         (closeBtn as HTMLElement).click();
@@ -453,57 +452,13 @@ async function scrapeTranscriptPanelInjected(hideNativeTranscript: boolean = tru
         }
       } else {
          _w('Native transcript button not found in description');
-      }
-
-      // Revert description expansion if we expanded it
-      if (!descriptionWasExpanded) {
+      }      // Revert description expansion if we expanded it
+      if (descriptionWasExpanded) {
         const collapseBtn = document.querySelector('tp-yt-paper-button#collapse');
         if (collapseBtn) {
           (collapseBtn as HTMLElement).click();
           _w('Collapsed description');
         }
-      }
-    }
-
-    // Step 2.5: If tlang is provided, try to select it from the language dropdown in the panel
-    if (tlang) {
-      _w('Step 2.5: Trying to select translation from transcript panel dropdown...');
-      try {
-        const langMenuBtn = document.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"] #language-menu button, #sort-menu button, .language-option button, .ytd-transcript-renderer #sort-menu button') as HTMLElement;
-        if (langMenuBtn) {
-           _w('Found language dropdown, clicking...');
-           langMenuBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-           langMenuBtn.click();
-           await new Promise(r => setTimeout(r, 600)); // Wait for popup to render
-
-           const popupItems = document.querySelectorAll('ytd-menu-popup-renderer tp-yt-paper-item, ytd-menu-popup-renderer ytd-menu-service-item-renderer, tp-yt-iron-dropdown tp-yt-paper-item, ytd-menu-popup-renderer yt-formatted-string');
-           _w(`Found ${popupItems.length} language items in dropdown`);
-           
-           let selected = false;
-           for (const item of Array.from(popupItems)) {
-             const text = (item.textContent || '').trim().toLowerCase();
-             // For English, match "english" or "ingilizce"
-             if (tlang === 'en' && (text.includes('ingilizce') || text.includes('english') || text.includes('eng'))) {
-                _w(`Clicking language item: ${text}`);
-                const clickableEl = item.closest('tp-yt-paper-item, ytd-menu-service-item-renderer') as HTMLElement || item;
-                clickableEl.click();
-                selected = true;
-                break;
-             }
-           }
-           if (selected) {
-             _w('Waiting for transcript segments to reload...');
-             await new Promise(r => setTimeout(r, 1200)); // Wait for segments to reload
-           } else {
-             _w('Could not find matching language in dropdown.');
-             // Click somewhere else to close dropdown
-             document.body.click();
-           }
-        } else {
-           _w('Language dropdown not found in panel.');
-        }
-      } catch (e: any) {
-        _w('Error selecting language from dropdown: ' + e.message);
       }
     }
 
@@ -699,7 +654,7 @@ function handleTranscriptPanel(_message: any, sendResponse: (response: any) => v
     return;
   }
   
-  const { tlang } = _message;
+  const { tlang, trackLang } = _message;
 
   chrome.storage.local.get('panel_settings').then(data => {
     const hideNative = data.panel_settings?.hideNativeTranscript ?? true;
@@ -708,7 +663,7 @@ function handleTranscriptPanel(_message: any, sendResponse: (response: any) => v
       target: { tabId, frameIds: [0] },
       world: 'MAIN',
       func: scrapeTranscriptPanelInjected,
-      args: [hideNative, tlang || null]
+      args: [hideNative, tlang || null, trackLang || null]
     }).then(results => {
       const result = results[0]?.result;
       if (result?.success && result.segments) {

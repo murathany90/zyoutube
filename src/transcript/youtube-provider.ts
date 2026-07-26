@@ -254,28 +254,12 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
     return text;
   }
 
-  private async fetchCaptionViaBackground(track: CaptionTrack, videoId: string, format: string, signal?: AbortSignal, tlang?: string): Promise<string | null> {
-    try {
-      const response = await sendRuntimeMessage<{ type: 'FETCH_CAPTION_FROM_MAIN'; requestId: string; videoId: string; track: CaptionTrack; format: string; tlang?: string }, { success: boolean; data?: { rawText: string; format: string }; error?: string; code?: string }>(
-        { type: 'FETCH_CAPTION_FROM_MAIN', requestId: Math.random().toString(), videoId, track, format, tlang },
-        { timeoutMs: 20000, signal }
-      );
-      if (response?.success && response.data?.rawText) {
-        const trimmed = response.data.rawText.trim();
-        if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) return null;
-        if (!trimmed) return null;
-        return response.data.rawText;
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  }
 
-  private async scrapeTranscriptPanel(videoId: string, tlang?: string): Promise<TranscriptSegment[] | null> {
+
+  private async scrapeTranscriptPanel(videoId: string, tlang?: string, trackLang?: string): Promise<TranscriptSegment[] | null> {
     try {
-      const response = await sendRuntimeMessage<{ type: 'FETCH_TRANSCRIPT_PANEL'; requestId: string; videoId: string; tlang?: string }, { success: boolean; segments?: any[]; error?: string }>(
-        { type: 'FETCH_TRANSCRIPT_PANEL', requestId: Math.random().toString(), videoId, tlang },
+      const response = await sendRuntimeMessage<{ type: 'FETCH_TRANSCRIPT_PANEL'; requestId: string; videoId: string; tlang?: string; trackLang?: string }, { success: boolean; segments?: any[]; error?: string }>(
+        { type: 'FETCH_TRANSCRIPT_PANEL', requestId: Math.random().toString(), videoId, tlang, trackLang },
         { timeoutMs: 25000 }
       );
       if (response?.success && response.segments && response.segments.length > 0) {
@@ -301,65 +285,69 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
     let usedFormat: string | undefined;
     let lastError: string | undefined;
     let panelSegments: TranscriptSegment[] | null = null;
-    let skipApi = false;
 
-    // Phase 1: Try direct content-script fetch (API fetch)
-    console.warn('ZYouTube [Transcript] Trying direct content-script fetch (API)...');
-    for (const fmt of this.FORMATS) {
-      if (skipApi) break;
+    const requiresPoToken = /(?:[?&])exp=xpe(?:&|$)/.test(track.baseUrl);
+    const shouldUseNativePlayer = Boolean(tlang) || requiresPoToken;
+
+    // Phase 1: Native player request capture (for translations or PoToken)
+    if (shouldUseNativePlayer) {
+      console.warn(`ZYouTube [Transcript] Using CAPTURE_NATIVE_CAPTION (tlang=${tlang || 'none'}, exp=${requiresPoToken})`);
       try {
-        const fetchUrl = this.buildCaptionUrl(track.baseUrl, fmt, tlang);
-        this.validateCaptionUrl(fetchUrl);
-        const result = await this.tryFetchCaption(fetchUrl, abortController?.signal);
-        if (result !== null) {
-          rawText = result;
-          usedFormat = fmt || '(default XML)';
-          break;
+        const response = await sendRuntimeMessage<{ type: 'CAPTURE_NATIVE_CAPTION'; requestId: string; videoId: string; sourceLanguage: string; sourceKind?: string; targetLanguage?: string }, { success: boolean; rawText?: string; mode?: string; error?: string }>(
+          { type: 'CAPTURE_NATIVE_CAPTION', requestId: Math.random().toString(), videoId, sourceLanguage: track.languageCode, sourceKind: track.kind, targetLanguage: tlang },
+          { timeoutMs: 25000, signal: abortController?.signal }
+        );
+        if (response?.success && response.rawText) {
+          rawText = response.rawText;
+          usedFormat = response.mode === 'translated' ? 'native-player-translation' : 'native-player-original';
+        } else {
+          lastError = response?.error || 'NATIVE_CAPTURE_FAILED';
+          console.warn(`ZYouTube [Transcript] CAPTURE_NATIVE_CAPTION failed:`, lastError);
         }
-        lastError = `EMPTY_BODY_${fmt || 'default'}`;
       } catch (e: any) {
         if (e.name === 'AbortError') {
-          throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı isteği iptal edildi.', {
-            expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'FETCH_ABORTED'
-          });
+          throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı isteği iptal edildi.', { expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'FETCH_ABORTED' });
         }
-        if (e.message === 'HTTP_429_TOO_MANY_REQUESTS') {
-          console.warn('ZYouTube [Transcript] API rate limited (429), skipping all further API fetch attempts.');
-          skipApi = true;
-          lastError = 'HTTP_429_TOO_MANY_REQUESTS';
-          break;
-        }
-        if (e instanceof TranscriptError) throw e;
         lastError = e.message;
+        console.warn(`ZYouTube [Transcript] CAPTURE_NATIVE_CAPTION error:`, e);
       }
     }
 
-    // Phase 2: Try via background MAIN world (API fetch)
-    if (rawText === null && !usedFormat && !skipApi) {
-      console.warn('ZYouTube [Transcript] Direct fetch failed, trying MAIN world via background...');
+    // Phase 2: Direct fetch (only for non-protected, non-translated original tracks)
+    if (rawText === null && !requiresPoToken && !tlang) {
+      console.warn('ZYouTube [Transcript] Trying direct content-script fetch (API)...');
       for (const fmt of this.FORMATS) {
         try {
-          const result = await this.fetchCaptionViaBackground(track, videoId, fmt, abortController?.signal, tlang);
+          const fetchUrl = this.buildCaptionUrl(track.baseUrl, fmt, tlang);
+          this.validateCaptionUrl(fetchUrl);
+          const result = await this.tryFetchCaption(fetchUrl, abortController?.signal);
           if (result !== null) {
             rawText = result;
             usedFormat = fmt || '(default XML)';
             break;
           }
-          lastError = `EMPTY_BODY_MAIN_${fmt || 'default'}`;
+          lastError = `EMPTY_BODY_${fmt || 'default'}`;
         } catch (e: any) {
+          if (e.name === 'AbortError') {
+            throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı isteği iptal edildi.', { expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'FETCH_ABORTED' });
+          }
+          if (e.message === 'HTTP_429_TOO_MANY_REQUESTS') {
+            console.warn('ZYouTube [Transcript] API rate limited (429), skipping further direct fetches.');
+            lastError = 'HTTP_429_TOO_MANY_REQUESTS';
+            break;
+          }
           lastError = e.message;
         }
       }
     }
 
-    // Phase 3: Fallback to scraping native YouTube transcript panel
-    // If tlang is specified, the injected DOM scraper will attempt to 
-    // force the YouTube player to switch to auto-translate before reading.
+    // Phase 3: Fallback to scraping native YouTube transcript panel (only for original track)
     if (rawText === null && !usedFormat) {
-      console.warn(`ZYouTube [Transcript] API fetches failed (tlang=${tlang || 'none'}), falling back to native transcript panel scraping...`);
+      console.warn(`ZYouTube [Transcript] API fetches failed, falling back to native transcript panel scraping (tlang ignored for scraper)`);
       try {
-        panelSegments = await this.scrapeTranscriptPanel(videoId, tlang);
-        if (panelSegments && panelSegments.length > 0) {
+        const segments = await this.scrapeTranscriptPanel(videoId);
+        if (segments && segments.length > 0) {
+          panelSegments = segments;
           usedFormat = 'transcript-panel';
           lastError = '';
         } else {
