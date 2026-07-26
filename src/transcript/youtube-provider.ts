@@ -285,27 +285,83 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
     let usedFormat: string | undefined;
     let lastError: string | undefined;
     let panelSegments: TranscriptSegment[] | null = null;
+    let resolvedLanguage = tlang || track.languageCode;
 
     const requiresPoToken = /(?:[?&])exp=xpe(?:&|$)/.test(track.baseUrl);
     const shouldUseNativePlayer = Boolean(tlang) || requiresPoToken;
 
     // Phase 1: Native player request capture (for translations or PoToken)
     if (shouldUseNativePlayer) {
-      console.warn(`ZYouTube [Transcript] Using CAPTURE_NATIVE_CAPTION (tlang=${tlang || 'none'}, exp=${requiresPoToken})`);
+      console.warn(`ZYouTube [Transcript] Using Native Caption Body Capture V2 (tlang=${tlang || 'none'}, exp=${requiresPoToken})`);
       try {
-        const response = await sendRuntimeMessage<{ type: 'CAPTURE_NATIVE_CAPTION'; requestId: string; videoId: string; sourceLanguage: string; sourceKind?: string; targetLanguage?: string }, { success: boolean; rawText?: string; mode?: string; error?: string }>(
-          { type: 'CAPTURE_NATIVE_CAPTION', requestId: Math.random().toString(), videoId, sourceLanguage: track.languageCode, sourceKind: track.kind, targetLanguage: tlang },
+        const requestId = Math.random().toString();
+        const timeoutMs = 20000;
+        
+        const capturePromise = new Promise<{ rawText: string; mode?: string }>((resolve, reject) => {
+          let timeoutId: number;
+          let messageListener: (e: MessageEvent) => void;
+          
+          const cleanup = () => {
+            window.clearTimeout(timeoutId);
+            window.removeEventListener("message", messageListener);
+          };
+
+          timeoutId = window.setTimeout(() => {
+            cleanup();
+            reject(new Error("NATIVE_BODY_CAPTURE_TIMEOUT"));
+          }, timeoutMs);
+
+          if (abortController?.signal) {
+             abortController.signal.addEventListener('abort', () => {
+                cleanup();
+                reject(new Error("FETCH_ABORTED"));
+             });
+          }
+
+          messageListener = (event: MessageEvent) => {
+            if (event.source !== window) return;
+            const data = event.data;
+            if (data && data.source === "zyoutube-main" && data.type === "ZY_CAPTION_CAPTURE_RESULT") {
+              if (data.requestId === requestId) {
+                cleanup();
+                resolve({
+                   rawText: data.rawText,
+                   mode: tlang ? 'native-player-translation' : 'native-player-original'
+                });
+              }
+            }
+          };
+
+          window.addEventListener("message", messageListener);
+          
+          // Arm the interceptor
+          window.postMessage({
+            source: "zyoutube-isolated",
+            type: "ZY_CAPTION_CAPTURE_ARM",
+            requestId,
+            videoId,
+            sourceLanguage: track.languageCode,
+            targetLanguage: tlang,
+            expiresAt: Date.now() + timeoutMs
+          }, "*");
+        });
+
+        // Trigger track change in background
+        const triggerResponse = await sendRuntimeMessage<{ type: 'CAPTURE_NATIVE_CAPTION'; requestId: string; videoId: string; sourceLanguage: string; sourceKind?: string; targetLanguage?: string }, { success: boolean; mode?: string; error?: string }>(
+          { type: 'CAPTURE_NATIVE_CAPTION', requestId, videoId, sourceLanguage: track.languageCode, sourceKind: track.kind, targetLanguage: tlang },
           { timeoutMs: 25000, signal: abortController?.signal }
         );
-        if (response?.success && response.rawText) {
-          rawText = response.rawText;
-          usedFormat = response.mode === 'translated' ? 'native-player-translation' : 'native-player-original';
-        } else {
-          lastError = response?.error || 'NATIVE_CAPTURE_FAILED';
-          console.warn(`ZYouTube [Transcript] CAPTURE_NATIVE_CAPTION failed:`, lastError);
+
+        if (!triggerResponse?.success) {
+           throw new Error(triggerResponse?.error || 'NATIVE_CAPTURE_TRIGGER_FAILED');
         }
+
+        const captureResult = await capturePromise;
+        rawText = captureResult.rawText;
+        usedFormat = captureResult.mode;
+        resolvedLanguage = tlang || track.languageCode;
       } catch (e: any) {
-        if (e.name === 'AbortError') {
+        if (e.message === 'FETCH_ABORTED' || e.name === 'AbortError') {
           throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı isteği iptal edildi.', { expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'FETCH_ABORTED' });
         }
         lastError = e.message;
@@ -324,6 +380,7 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
           if (result !== null) {
             rawText = result;
             usedFormat = fmt || '(default XML)';
+            resolvedLanguage = track.languageCode;
             break;
           }
           lastError = `EMPTY_BODY_${fmt || 'default'}`;
@@ -347,9 +404,16 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
       try {
         const segments = await this.scrapeTranscriptPanel(videoId);
         if (segments && segments.length > 0) {
-          panelSegments = segments;
-          usedFormat = 'transcript-panel';
-          lastError = '';
+          // If translation was requested, we MUST NOT return the original scraper results as "success"
+          if (tlang && tlang !== track.languageCode) {
+            console.warn('ZYouTube [Transcript] Scraper returned original language, but translation was requested. Throwing TRANSLATION_UNAVAILABLE.');
+            lastError = 'TRANSLATION_UNAVAILABLE';
+          } else {
+            panelSegments = segments;
+            usedFormat = 'transcript-panel';
+            resolvedLanguage = track.languageCode;
+            lastError = '';
+          }
         } else {
           lastError = 'TRANSCRIPT_PANEL_FAILED';
         }
@@ -388,7 +452,7 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
 
     let segments: TranscriptSegment[] = [];
     try {
-       segments = parseTranscript(rawText!, track.languageCode);
+       segments = parseTranscript(rawText!, resolvedLanguage);
     } catch (e: any) {
        throw new TranscriptError('CAPTION_PARSE_FAILED', 'Altyazı verisi çözümlenemedi veya bozuk.', {
          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: e.message

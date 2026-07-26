@@ -8,8 +8,7 @@
     "tabs",
     "scripting",
     "activeTab",
-    "clipboardWrite",
-    "webRequest"
+    "clipboardWrite"
   ],
   "host_permissions": [
     "https://*.youtube.com/*",
@@ -26,6 +25,14 @@
     "type": "module"
   },
   "content_scripts": [
+    {
+      "matches": [
+        "https://*.youtube.com/*"
+      ],
+      "js": ["src/content/caption-network-hook.ts"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": [
         "https://*.youtube.com/*"
