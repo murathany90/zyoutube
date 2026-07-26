@@ -1,5 +1,4 @@
-import { ExtensionSettings, DEFAULT_SETTINGS, AIProviderConfig } from './types';
-import { AIProviderId } from '../ai/types';
+import { ExtensionSettings, DEFAULT_SETTINGS, AIProviderConfig, AIProviderId } from './types';
 
 export class AISettingsService {
   private static STORAGE_KEY = 'ai_summary_settings';
@@ -27,26 +26,38 @@ export class AISettingsService {
         }
       };
 
+      // Migration: eski defaultProviderId varsa defaultEngine'e çevir
+      if (!savedSettings.defaultEngine && savedSettings.defaultProviderId) {
+        if (savedSettings.defaultProviderId === 'gemini-api') {
+          merged.defaultEngine = 'gemini-gem';
+        } else if (savedSettings.defaultProviderId === 'openai-compatible') {
+          merged.defaultEngine = 'openai-compatible';
+        } else if (savedSettings.defaultProviderId === 'chrome-local') {
+          merged.defaultEngine = 'chrome-local';
+        }
+      }
+
       // Deep merge providers
       if (savedSettings.providers) {
-         for (const [key, value] of Object.entries(savedSettings.providers)) {
-           merged.providers[key] = {
-             ...DEFAULT_SETTINGS.providers[key],
-             ...value
-           };
-         }
+        for (const [key, value] of Object.entries(savedSettings.providers)) {
+          if (key === 'gemini-api') continue; // Eski Gemini API provider'ı atla
+          merged.providers[key] = {
+            ...DEFAULT_SETTINGS.providers[key],
+            ...value
+          };
+        }
       }
 
       // Restore session keys
       for (const [key, provider] of Object.entries(merged.providers)) {
         if (provider.isSessionStorage) {
-           const sessionData = await chrome.storage.session.get(this.SESSION_PREFIX + key);
-           const sessionKey = sessionData[this.SESSION_PREFIX + key];
-           if (sessionKey) {
-             provider.apiKey = sessionKey;
-           } else {
-             provider.apiKey = undefined; // Do not use local key if it's set to session
-           }
+          const sessionData = await chrome.storage.session.get(this.SESSION_PREFIX + key);
+          const sessionKey = sessionData[this.SESSION_PREFIX + key];
+          if (sessionKey) {
+            provider.apiKey = sessionKey;
+          } else {
+            provider.apiKey = undefined;
+          }
         }
       }
 
@@ -61,16 +72,14 @@ export class AISettingsService {
     if (typeof chrome === 'undefined' || !chrome.storage) return;
 
     try {
-      // Create a copy for local storage
       const localSettings: ExtensionSettings = JSON.parse(JSON.stringify(settings));
 
       // Separate session keys
       for (const [key, provider] of Object.entries(localSettings.providers)) {
         if (provider.isSessionStorage && provider.apiKey) {
           await chrome.storage.session.set({ [this.SESSION_PREFIX + key]: provider.apiKey });
-          provider.apiKey = undefined; // Do not save to local storage
+          provider.apiKey = undefined;
         } else if (!provider.isSessionStorage) {
-          // If switched from session to local, remove session key
           await chrome.storage.session.remove(this.SESSION_PREFIX + key);
         }
       }

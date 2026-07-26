@@ -1,0 +1,30 @@
+@tailwind components;
+@tailwind utilities;
+
+/* Minimal Shadow DOM reset */
+:host {
+  all: initial;
+  display: block;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--zy-text, #111827);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+select, input {
+  font-family: inherit;
+}
+
+.zyoutube-root {
+  width: 100%;
+  height: 100%;
+}

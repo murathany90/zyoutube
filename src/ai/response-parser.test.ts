@@ -4,7 +4,7 @@ import { AIProviderId } from './types';
 
 describe('ResponseParser', () => {
   const mockOptions = { outputLanguage: 'tr' as const, length: 'short' as const };
-  const mockProvider: AIProviderId = 'gemini-api';
+  const mockProvider: AIProviderId = 'openai-compatible';
 
   it('should parse valid JSON', () => {
     const json = JSON.stringify({

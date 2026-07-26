@@ -83,7 +83,9 @@ export class OpenAICompatibleProvider implements AIProvider {
     const systemPrompt = PromptBuilder.buildSystemPrompt(request, context.promptType);
     const userPrompt = PromptBuilder.buildUserPrompt(request, context.promptType, context.customContent);
 
-    const body = {
+    const isNvidiaNIM = urlStr.includes('integrate.api.nvidia.com') || urlStr.includes('nvcr.io');
+    
+    const body: any = {
       model: model,
       messages: [
         { role: 'system', content: systemPrompt },
@@ -91,8 +93,14 @@ export class OpenAICompatibleProvider implements AIProvider {
       ],
       temperature: config.temperature ?? 0.7,
       max_tokens: config.maxTokens,
-      response_format: { type: 'json_object' } // Bazı modeller desteklemez, ama standart için deniyoruz
     };
+    
+    if (isNvidiaNIM && model.includes('deepseek')) {
+      // NVIDIA deepseek-v4-flash NIM settings
+      body.chat_template_kwargs = { thinking: true, reasoning_effort: "high" };
+    } else {
+      body.response_format = { type: 'json_object' };
+    }
 
     let controller = new AbortController();
     if (context.signal) {
@@ -134,9 +142,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       }
 
       const choice = data.choices[0];
-      if (choice.finish_reason === 'length') {
-         // Kısmen geldi, ne yapmalıyız? Şimdilik devam edelim.
-      } else if (choice.finish_reason === 'content_filter') {
+      if (choice.finish_reason === 'content_filter') {
         throw new AIProviderError({
           code: 'CONTENT_BLOCKED',
           userMessage: 'İçerik güvenlik filtresi tarafından engellendi.',
@@ -145,7 +151,18 @@ export class OpenAICompatibleProvider implements AIProvider {
         });
       }
 
-      const text = choice.message?.content || '';
+      let text = choice.message?.content;
+      
+      if (!text && choice.message?.reasoning_content) {
+         throw new AIProviderError({
+           code: 'INVALID_RESPONSE',
+           userMessage: 'Yapay zeka sadece düşünme sürecini (reasoning) döndürdü, ana özet bulunamadı.',
+           retryable: true,
+           providerId: this.id
+         });
+      }
+      
+      text = text || '';
       
       const parsedResult = ResponseParser.parseAndValidate(
         text,

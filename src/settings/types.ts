@@ -1,4 +1,7 @@
-import { AIProviderId } from '../ai/types';
+import { SummaryEngine } from '../gem/types';
+
+// Eski API provider'ları için
+export type AIProviderId = 'openai-compatible' | 'chrome-local';
 
 export interface AIProviderConfig {
   id: AIProviderId;
@@ -13,26 +16,21 @@ export interface AIProviderConfig {
 }
 
 export interface ExtensionSettings {
-  defaultProviderId: AIProviderId;
+  defaultEngine: SummaryEngine;
   defaultLength: 'short' | 'standard' | 'detailed';
   defaultLanguage: 'tr' | 'en' | 'tr-en';
   playTimestampOnClick: boolean;
   providers: Record<string, AIProviderConfig>;
+  // Eski uyumluluk: migration sırasında hâlâ okunabilir
+  defaultProviderId?: string;
 }
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
-  defaultProviderId: 'gemini-api',
+  defaultEngine: 'gemini-gem',
   defaultLength: 'standard',
   defaultLanguage: 'tr-en',
   playTimestampOnClick: true,
   providers: {
-    'gemini-api': {
-      id: 'gemini-api',
-      model: 'gemini-2.5-flash',
-      timeoutMs: 30000,
-      temperature: 0.7,
-      isSessionStorage: false
-    },
     'openai-compatible': {
       id: 'openai-compatible',
       model: 'deepseek-chat',

@@ -31,6 +31,11 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
     extensionId = extensionUrl.split('/')[2];
     console.log(`Extension loaded with ID: ${extensionId}`);
     
+    // Ensure panelEnabled is true for tests
+    await background.evaluate(() => new Promise<void>(resolve => {
+      chrome.storage.local.set({ panelEnabled: true }, resolve);
+    }));
+    
     // Quick ping to SW to ensure it's alive (check for errors)
     const errs: string[] = [];
     background.on('pageerror', err => errs.push(err.message));
@@ -46,11 +51,8 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
     await popupPage.goto(`chrome-extension://${extensionId}/index.html`);
     
     // Yalnızca ayarlar ve yönetim alanı var. Uzun özet yok.
-    const title = popupPage.locator('h1', { hasText: 'AI Özet Ayarları' });
+    const title = popupPage.locator('h1', { hasText: 'ZYouTube Ayarları' });
     await expect(title).toBeVisible();
-
-    const openPanelBtn = popupPage.locator('button', { hasText: "Panel'i Aç" });
-    await expect(openPanelBtn).toBeVisible();
 
     await popupPage.close();
   });
@@ -63,6 +65,7 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
       <html>
         <head><title>YouTube</title></head>
         <body>
+          <div id="secondary"><div id="secondary-inner"></div></div>
           <div id="above-the-fold">
             <div id="top-level-buttons-computed" style="display:flex;"></div>
           </div>
@@ -92,7 +95,7 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
     });
 
     // Intercept caption request (must be on context because SW makes the request)
-    await browserContext.route('https://www.youtube.com/api/timedtext?v=fixtureVideoId', async (route) => {
+    await browserContext.route('https://www.youtube.com/api/timedtext*', async (route) => {
       let xml = '<?xml version="1.0" encoding="utf-8" ?><transcript>';
       for (let i = 0; i < 5000; i++) {
         xml += `<text start="${i}" dur="1">Virtual Segment ${i}</text>`;
@@ -107,20 +110,16 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
 
     await page.goto('https://www.youtube.com/watch?v=fixtureVideoId');
 
-    // Buton enjekte edildi mi?
-    const button = page.locator('#ai-summary-btn');
-    await expect(button).toBeVisible({ timeout: 5000 });
+    // Panel should auto-open (no toggle button)
+    const panel = page.locator('#zyoutube-panel-host');
+    await expect(panel).toBeVisible({ timeout: 8000 });
+    // Verify Shadow Root exists
+    const hasShadowRoot = await panel.evaluate(el => Boolean(el.shadowRoot));
+    expect(hasShadowRoot).toBe(true);
     
-    // Popup'tan panel açma tetikleyicisi
-    const popupPage = await browserContext.newPage();
-    await popupPage.goto(`chrome-extension://${extensionId}/index.html`);
-    const openPanelBtn = popupPage.locator('button', { hasText: "Panel'i Aç" });
-    await openPanelBtn.click();
-    await popupPage.close();
-
-    // Panel açıldı mı?
-    const panel = page.locator('#ai-summary-panel-container');
-    await expect(panel).toBeVisible();
+    // Verify no toggle button exists
+    const toggleButton = page.locator('#zyoutube-toggle-button');
+    await expect(toggleButton).not.toBeVisible();
 
     // Transkript sekmesine geçiş
     const transcriptTabBtn = page.getByRole('button', { name: 'Transkript' });
@@ -149,5 +148,9 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
        return nodes.filter(n => n.textContent && n.textContent.includes('Virtual Segment ') && n.children.length === 0).length;
     });
     expect(segmentCountAfterSearch).toBeLessThan(200);
+
+    // Verify only one panel exists
+    const panelCount = await page.evaluate(() => document.querySelectorAll('#zyoutube-panel-host').length);
+    expect(panelCount).toBe(1);
   });
 });

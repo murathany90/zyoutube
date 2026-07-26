@@ -9,6 +9,50 @@ export interface TranscriptSegment {
   languageCode: string;
 }
 
+export type TranscriptErrorCode =
+  | 'PLAYER_RESPONSE_NOT_READY'
+  | 'PLAYER_RESPONSE_VIDEO_MISMATCH'
+  | 'CAPTION_TRACKS_EMPTY'
+  | 'CAPTION_FETCH_FAILED'
+  | 'CAPTION_PARSE_FAILED'
+  | 'CAPTION_URL_REJECTED'
+  | 'CAPTION_RESPONSE_HTML'
+  | 'CAPTION_FETCH_TIMEOUT'
+  | 'EXTENSION_CONTEXT_INVALIDATED'
+  | 'BACKGROUND_EMPTY_BODY'
+  | 'PAGE_CONTEXT_EMPTY_BODY'
+  | 'CAPTION_URL_EXPIRED'
+  | 'CAPTION_FORMAT_CONFLICT'
+  | 'CAPTION_HTTP_ERROR'
+  | 'TRANSCRIPT_PANEL_FALLBACK_FAILED';
+
+export class TranscriptError extends Error {
+  constructor(public code: TranscriptErrorCode, message: string, public diagnostics?: TranscriptDiagnostics) {
+    super(message);
+    this.name = 'TranscriptError';
+  }
+}
+
+export interface TranscriptDiagnostics {
+  expectedVideoId: string;
+  detectedVideoId?: string;
+  extractionSource:
+    | 'movie_player'
+    | 'ytd-player'
+    | 'watch-flexy'
+    | 'ytplayer-config'
+    | 'initial-player-response'
+    | 'script-fallback'
+    | 'transcript-panel'
+    | 'none';
+  playerResponseFound: boolean;
+  captionsObjectFound: boolean;
+  trackCount: number;
+  trackLanguages: string[];
+  retryCount: number;
+  errorCode?: string;
+}
+
 export interface TranscriptQuality {
   level: 'high' | 'medium' | 'low';
   internalScore: number;
@@ -46,6 +90,7 @@ export interface TranscriptResult {
   coverageRatio: number;
   quality: TranscriptQuality | null;
   warnings: string[];
+  diagnostics?: TranscriptDiagnostics;
 }
 
 export interface ITranscriptProvider {

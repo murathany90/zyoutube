@@ -1,6 +1,7 @@
 import { TranscriptSegment } from '../transcript/types';
+import { SummaryEngine } from '../gem/types';
 
-export type AIProviderId = 'gemini-api' | 'openai-compatible' | 'chrome-local' | 'gemini-gem';
+export type AIProviderId = 'openai-compatible' | 'chrome-local';
 
 export interface SummaryRequest {
   taskId: string;
@@ -25,6 +26,7 @@ export interface SummaryRequest {
     includeSections: boolean;
     includeActionItems: boolean;
   };
+  engine?: SummaryEngine;
 }
 
 export interface LocalizedText {
@@ -58,7 +60,7 @@ export interface SummaryResult {
   schemaVersion: 1;
   taskId: string;
   videoId: string;
-  providerId: AIProviderId;
+  providerId: AIProviderId | 'gemini-gem';
   model: string;
   outputLanguage: 'tr' | 'en' | 'tr-en';
   summaryLength: 'short' | 'standard' | 'detailed';
@@ -131,13 +133,15 @@ export type AIErrorCode =
   | 'CONTENT_BLOCKED'
   | 'TRANSCRIPT_TOO_LONG'
   | 'VIDEO_CHANGED'
+  | 'GEM_NOT_CONFIGURED'
+  | 'GEM_AUTOMATION_FAILED'
   | 'UNKNOWN_ERROR';
 
 export interface AIError {
   code: AIErrorCode;
   userMessage: string;
   retryable: boolean;
-  providerId?: AIProviderId;
+  providerId?: AIProviderId | 'gemini-gem';
   statusCode?: number;
   debugMessage?: string;
 }
@@ -156,7 +160,8 @@ export interface AITask {
   taskId: string;
   tabId: number;
   videoId: string;
-  providerId: AIProviderId;
+  engine: SummaryEngine;
+  providerId?: AIProviderId;
   status: AITaskStatus;
   createdAt: number;
   updatedAt: number;

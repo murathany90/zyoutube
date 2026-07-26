@@ -2,20 +2,47 @@ import { useState, useEffect } from 'react';
 import { SummaryResult, AITaskStatus, SummaryRequest } from '../../ai/types';
 import { YouTubeTranscriptProvider } from '../../transcript/youtube-provider';
 import { AISettingsService } from '../../settings/ai-settings';
+import { SummaryEngine } from '../../gem/types';
+import { sendRuntimeMessage } from '../runtime-messenger';
 
-export const SummaryTab = ({ videoId, title, url }: { videoId: string, title: string, url: string }) => {
+export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: string; url: string }) => {
   const [status, setStatus] = useState<AITaskStatus>('queued');
-  const [progressMessage, setProgressMessage] = useState<string>('Başlatılıyor...');
+  const [progressMessage, setProgressMessage] = useState<string>('');
   const [result, setResult] = useState<SummaryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
 
+  const [selectedEngine, setSelectedEngine] = useState<SummaryEngine>('gemini-gem');
+  const [selectedLength, setSelectedLength] = useState<'short' | 'standard' | 'detailed'>('standard');
+  const [selectedLanguage, setSelectedLanguage] = useState<'tr' | 'en' | 'tr-en'>('tr-en');
+
   useEffect(() => {
-    // Dinleyici kaydet (Background üzerinden gelen ilerleme ve sonuç mesajlarını yakalamak için)
+    AISettingsService.getSettings().then(s => {
+      setSelectedEngine(s.defaultEngine);
+      setSelectedLength(s.defaultLength);
+      setSelectedLanguage(s.defaultLanguage);
+    });
+  }, []);
+
+  // Video değişiminde sıfırla
+  useEffect(() => {
+    setStatus('queued');
+    setProgressMessage('');
+    setResult(null);
+    setError(null);
+    setIsProcessing(false);
+    if (taskId) {
+      sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId }).catch(() => {});
+      setTaskId(null);
+    }
+  }, [videoId]);
+
+  // İlerleme ve sonuç dinleyicisi
+  useEffect(() => {
+    if (!taskId) return;
     const listener = (message: any) => {
       if (message.taskId !== taskId) return;
-      
       if (message.type === 'SUMMARY_PROGRESS') {
         setStatus(message.status);
         if (message.message) setProgressMessage(message.message);
@@ -41,10 +68,14 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string, title: st
       setProgressMessage('Transkript çekiliyor...');
 
       const provider = new YouTubeTranscriptProvider();
-      const settings = await AISettingsService.getSettings();
       const tracks = await provider.getAvailableTracks(videoId);
-      if (tracks.length === 0) throw new Error('Transkript bulunamadı.');
-      const track = tracks.find(t => t.languageCode === settings.defaultLanguage) || tracks[0];
+      
+      const preferredLang = selectedLanguage.includes('tr') ? 'tr' : 'en';
+      let track = tracks.find(t => t.languageCode === preferredLang && t.sourceType === 'manual');
+      if (!track) track = tracks.find(t => t.languageCode === preferredLang);
+      if (!track) track = tracks.find(t => t.sourceType === 'manual');
+      if (!track) track = tracks[0];
+      
       const transcriptResult = await provider.fetchTranscript(videoId, track);
 
       const request: SummaryRequest = {
@@ -55,28 +86,31 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string, title: st
           sourceType: track.sourceType || 'unknown',
           qualityLevel: transcriptResult.quality?.level || 'medium',
           qualityReasons: transcriptResult.quality?.reasons || [],
-          segments: transcriptResult.segments
+          segments: transcriptResult.segments,
         },
         options: {
-          length: settings.defaultLength,
-          outputLanguage: settings.defaultLanguage,
+          length: selectedLength,
+          outputLanguage: selectedLanguage,
           includeKeyIdeas: true,
           includeSections: true,
-          includeActionItems: true
-        }
+          includeActionItems: true,
+        },
+        engine: selectedEngine,
       };
 
       setTaskId(request.taskId);
+      setProgressMessage(selectedEngine === 'gemini-gem' ? 'Gemini Gem başlatılıyor...' : 'AI Sağlayıcı aranıyor...');
 
-      setProgressMessage('AI Provider aranıyor...');
-      
-      chrome.runtime.sendMessage({
+      sendRuntimeMessage({
         type: 'START_SUMMARY',
-        request
-      });
-      
+        request,
+      }).catch(() => {});
     } catch (e: any) {
-      setError(e.message || 'Transkript çekilemedi.');
+      let msg = e.message || 'Transkript çekilemedi.';
+      if (e.diagnostics) {
+         msg += `\n[Tanılama: ${e.diagnostics.extractionSource}, Tracks: ${e.diagnostics.trackCount}]`;
+      }
+      setError(msg);
       setIsProcessing(false);
       setStatus('failed');
     }
@@ -84,108 +118,165 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string, title: st
 
   const cancelSummary = () => {
     if (taskId) {
-      chrome.runtime.sendMessage({ type: 'CANCEL_SUMMARY', taskId });
+      sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId }).catch(() => {});
       setIsProcessing(false);
       setStatus('cancelled');
       setProgressMessage('İptal edildi.');
     }
   };
 
+  const handleTimeClick = (ms: number | undefined | null) => {
+    if (ms == null) return;
+    const seconds = Math.floor(ms / 1000);
+    const videoElement = document.querySelector('video');
+    if (videoElement) {
+      videoElement.currentTime = seconds;
+      videoElement.play();
+    }
+  };
+
+  const engineLabels: Record<SummaryEngine, string> = {
+    'gemini-gem': 'Gemini Gem',
+    'openai-compatible': 'API',
+    'chrome-local': 'Yerel AI',
+  };
+
+  // ─── İlk ekran: motor seçimi ve başlatma ───
   if (!isProcessing && !result && status !== 'cancelled' && status !== 'failed') {
     return (
-      <div className="text-sm flex flex-col items-start gap-4 p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
-        <p className="text-gray-700 dark:text-gray-300">Bu video için henüz bir özet oluşturulmadı.</p>
-        <button 
-          onClick={startSummary}
-          className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white font-medium rounded-full transition shadow-sm"
+      <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+          <div>
+            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Motor</label>
+            <select value={selectedEngine} onChange={e => setSelectedEngine(e.target.value as SummaryEngine)}
+              style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', backgroundColor: 'var(--zy-card-bg, #fff)', color: 'var(--zy-text, #111827)' }}
+            >
+              <option value="gemini-gem">Gemini Gem</option>
+              <option value="openai-compatible">API</option>
+              <option value="chrome-local">Yerel AI</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Uzunluk</label>
+            <select value={selectedLength} onChange={e => setSelectedLength(e.target.value as any)}
+              style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', backgroundColor: 'var(--zy-card-bg, #fff)', color: 'var(--zy-text, #111827)' }}
+            >
+              <option value="short">Kısa</option>
+              <option value="standard">Standart</option>
+              <option value="detailed">Ayrıntılı</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Dil</label>
+            <select value={selectedLanguage} onChange={e => setSelectedLanguage(e.target.value as any)}
+              style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', backgroundColor: 'var(--zy-card-bg, #fff)', color: 'var(--zy-text, #111827)' }}
+            >
+              <option value="tr">Türkçe</option>
+              <option value="en">English</option>
+              <option value="tr-en">Türkçe + English</option>
+            </select>
+          </div>
+        </div>
+
+        <p style={{ color: 'var(--zy-text-muted, #6b7280)', fontSize: '12px' }}>Bu video için henüz bir özet oluşturulmadı.</p>
+        <button onClick={startSummary}
+          style={{
+            padding: '8px 20px', backgroundColor: '#ef4444', color: '#ffffff', border: 'none',
+            borderRadius: '20px', fontWeight: 600, fontSize: '13px', cursor: 'pointer',
+            transition: 'background 0.15s', alignSelf: 'flex-start',
+          }}
         >
-          Şimdi Özetle
+          {selectedEngine === 'gemini-gem' ? 'Gemini Gem ile Özetle' : 'Şimdi Özetle'}
         </button>
       </div>
     );
   }
 
+  // ─── İşleniyor ───
   if (isProcessing) {
     return (
-      <div className="p-6 border border-gray-200 dark:border-gray-700 rounded-lg flex flex-col items-center justify-center gap-4">
-        <div className="w-8 h-8 border-4 border-red-200 border-t-red-600 rounded-full animate-spin"></div>
-        <div className="text-center">
-          <h3 className="font-bold text-gray-800 dark:text-gray-200">İşleniyor</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{progressMessage}</p>
+      <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+        <div style={{
+          width: '32px', height: '32px', border: '3px solid var(--zy-border, #fecaca)', borderTop: '3px solid #ef4444',
+          borderRadius: '50%', animation: 'spin 1s linear infinite'
+        }} />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <div style={{ textAlign: 'center' }}>
+          <p style={{ fontWeight: 700, fontSize: '14px', margin: '0 0 4px' }}>İşleniyor</p>
+          <p style={{ fontSize: '12px', color: 'var(--zy-text-muted, #6b7280)' }}>{progressMessage}</p>
         </div>
-        <button 
-          onClick={cancelSummary}
-          className="mt-2 px-4 py-1 text-sm text-gray-600 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400 transition"
-        >
-          İptal Et
-        </button>
+        <button onClick={cancelSummary}
+          style={{
+            padding: '5px 14px', fontSize: '12px', color: 'var(--zy-text-muted, #6b7280)', background: 'none',
+            border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', cursor: 'pointer',
+          }}
+        >İptal Et</button>
       </div>
     );
   }
 
+  // ─── Hata ───
   if (error) {
     return (
-      <div className="p-4 border border-red-200 bg-red-50 dark:bg-red-900/20 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400">
-        <p className="font-bold mb-2">Özetleme Başarısız</p>
+      <div style={{ padding: '12px', border: '1px solid var(--zy-error-border, #fecaca)', backgroundColor: 'var(--zy-error-bg, #fef2f2)', borderRadius: '8px', fontSize: '13px', color: 'var(--zy-error-text, #dc2626)' }}>
+        <p style={{ fontWeight: 700, marginBottom: '6px' }}>Özetleme Başarısız</p>
         <p>{error}</p>
-        <button 
-          onClick={startSummary}
-          className="mt-4 px-4 py-1.5 bg-red-100 hover:bg-red-200 dark:bg-red-800 dark:hover:bg-red-700 rounded font-medium transition"
-        >
-          Tekrar Dene
-        </button>
+        <button onClick={startSummary}
+          style={{ marginTop: '10px', padding: '5px 12px', fontSize: '12px', backgroundColor: 'var(--zy-error-bg, #fef2f2)', border: 'none', borderRadius: '4px', fontWeight: 600, cursor: 'pointer' }}
+        >Tekrar Dene</button>
       </div>
     );
   }
 
+  // ─── İptal ───
   if (status === 'cancelled') {
     return (
-      <div className="p-4 border border-gray-200 rounded-lg text-sm text-gray-600 dark:text-gray-400">
+      <div style={{ padding: '12px', fontSize: '13px', color: 'var(--zy-text-muted, #6b7280)' }}>
         <p>İşlem kullanıcı tarafından iptal edildi.</p>
-        <button 
-          onClick={startSummary}
-          className="mt-4 px-4 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded font-medium transition"
-        >
-          Tekrar Dene
-        </button>
+        <button onClick={startSummary}
+          style={{ marginTop: '8px', padding: '5px 12px', fontSize: '12px', backgroundColor: 'var(--zy-item-bg, #f3f4f6)', border: 'none', borderRadius: '4px', fontWeight: 600, cursor: 'pointer' }}
+        >Tekrar Dene</button>
       </div>
     );
   }
 
+  // ─── Sonuç ───
   if (result) {
-    const isTurkish = result.outputLanguage.includes('tr');
-    
+    const isDual = result.outputLanguage === 'tr-en';
+    const hasTr = result.outputLanguage.includes('tr');
+
     return (
-      <div className="space-y-6 animate-fade-in">
-        {/* Main Summary */}
-        <div className="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
-          <h3 className="font-bold text-lg mb-2 text-gray-900 dark:text-gray-100">Özet</h3>
-          <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
-            {isTurkish ? result.summary.tr : result.summary.en}
-          </p>
+      <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={startSummary} style={{ fontSize: '11px', color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+            Yeniden Oluştur
+          </button>
         </div>
 
-        {/* Key Ideas */}
-        {result.keyIdeas && result.keyIdeas.length > 0 && (
+        {/* Özet */}
+        <div style={{ backgroundColor: 'var(--zy-card-inner, rgba(0,0,0,0.03))', padding: '12px', borderRadius: '8px', border: '1px solid var(--zy-border, rgba(0,0,0,0.06))' }}>
+          <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>Özet</h3>
+          {(isDual || hasTr) && <p style={{ lineHeight: '1.6', color: 'var(--zy-text, #374151)' }}>{result.summary.tr || result.summary.en}</p>}
+          {isDual && <hr style={{ border: 'none', borderTop: '1px solid rgba(0,0,0,0.06)', margin: '8px 0' }} />}
+          {(isDual || !hasTr) && <p style={{ lineHeight: '1.6', color: 'var(--zy-text, #374151)' }}>{result.summary.en || result.summary.tr}</p>}
+        </div>
+
+        {/* Ana Fikirler */}
+        {result.keyIdeas?.length > 0 && (
           <div>
-            <h3 className="font-bold text-lg mb-3 flex items-center gap-2">
-              <span className="w-5 h-5 bg-blue-100 text-blue-600 rounded flex items-center justify-center text-xs">💡</span>
-              Ana Fikirler
-            </h3>
-            <ul className="space-y-3">
+            <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>💡 Ana Fikirler</h3>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {result.keyIdeas.map((ki, idx) => (
-                <li key={idx} className="flex gap-3 items-start p-3 bg-white dark:bg-[#1a1a1a] border border-gray-100 dark:border-gray-700/50 rounded-lg shadow-sm">
-                  {ki.startTimeMs !== null && ki.startTimeMs !== undefined && (
-                    <button className="text-xs bg-gray-100 dark:bg-gray-800 hover:bg-red-50 hover:text-red-600 dark:hover:text-red-400 px-2 py-1 rounded text-gray-600 transition shrink-0">
-                      {formatTime(ki.startTimeMs)}
-                    </button>
+                <li key={idx} style={{ padding: '8px', backgroundColor: 'var(--zy-card-bg, #fff)', border: '1px solid var(--zy-border, #e5e7eb)', borderRadius: '6px', display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                  {ki.startTimeMs != null && (
+                    <button onClick={() => handleTimeClick(ki.startTimeMs)}
+                      style={{ fontSize: '11px', backgroundColor: 'var(--zy-item-bg, #f3f4f6)', padding: '2px 6px', borderRadius: '3px', border: 'none', color: 'var(--zy-text-muted, #6b7280)', cursor: 'pointer', flexShrink: 0 }}
+                    >{formatTime(ki.startTimeMs)}</button>
                   )}
                   <div>
-                    <h4 className="font-bold text-gray-800 dark:text-gray-200">
-                      {isTurkish ? ki.title?.tr : ki.title?.en}
-                    </h4>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                      {isTurkish ? ki.description?.tr : ki.description?.en}
+                    <strong>{(isDual || hasTr) ? (ki.title?.tr || ki.title?.en) : (ki.title?.en || ki.title?.tr)}</strong>
+                    <p style={{ margin: '4px 0 0', color: 'var(--zy-text-muted, #6b7280)', fontSize: '12px' }}>
+                      {(isDual || hasTr) ? (ki.description?.tr || ki.description?.en) : (ki.description?.en || ki.description?.tr)}
                     </p>
                   </div>
                 </li>
@@ -194,34 +285,34 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string, title: st
           </div>
         )}
 
-        {/* Sections */}
-        {result.sections && result.sections.length > 0 && (
+        {/* Bölümler */}
+        {result.sections?.length > 0 && (
           <div>
-             <h3 className="font-bold text-lg mb-3">Bölümler</h3>
-             <div className="space-y-4 border-l-2 border-gray-200 dark:border-gray-700 pl-4">
-               {result.sections.map((sec, idx) => (
-                 <div key={idx} className="relative">
-                   <div className="absolute -left-[21px] top-1.5 w-2 h-2 rounded-full bg-red-400 border-[3px] border-white dark:border-[#272727] box-content"></div>
-                   <h4 className="font-bold text-gray-800 dark:text-gray-200">
-                     {isTurkish ? sec.title?.tr : sec.title?.en}
-                     {sec.startTimeMs !== null && sec.startTimeMs !== undefined && (
-                       <span className="ml-2 text-xs font-normal text-gray-500">[{formatTime(sec.startTimeMs)}]</span>
-                     )}
-                   </h4>
-                   <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                     {isTurkish ? sec.summary?.tr : sec.summary?.en}
-                   </p>
-                 </div>
-               ))}
-             </div>
+            <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>Bölümler</h3>
+            <div style={{ borderLeft: '2px solid var(--zy-border, #e5e7eb)', paddingLeft: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {result.sections.map((sec, idx) => (
+                <div key={idx}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <strong>{(isDual || hasTr) ? (sec.title?.tr || sec.title?.en) : (sec.title?.en || sec.title?.tr)}</strong>
+                    {sec.startTimeMs != null && (
+                      <button onClick={() => handleTimeClick(sec.startTimeMs)}
+                        style={{ fontSize: '10px', color: 'var(--zy-text-muted, #6b7280)', background: 'none', border: 'none', cursor: 'pointer' }}
+                      >[{formatTime(sec.startTimeMs)}]</button>
+                    )}
+                  </div>
+                  <p style={{ margin: '4px 0 0', color: 'var(--zy-text-muted, #6b7280)', fontSize: '12px' }}>
+                    {(isDual || hasTr) ? (sec.summary?.tr || sec.summary?.en) : (sec.summary?.en || sec.summary?.tr)}
+                  </p>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
-        <div className="text-xs text-gray-400 dark:text-gray-500 flex justify-between border-t border-gray-200 dark:border-gray-700 pt-3">
-          <span>Sağlayıcı: {result.providerId} ({result.model})</span>
-          {result.usage && (
-            <span>Tokens: In {result.usage.inputTokens} | Out {result.usage.outputTokens}</span>
-          )}
+        {/* Meta bilgi */}
+        <div style={{ fontSize: '11px', color: 'var(--zy-text-muted, #9ca3af)', display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--zy-border, #e5e7eb)', paddingTop: '8px' }}>
+          <span>Motor: {engineLabels[result.providerId as SummaryEngine] || result.providerId}</span>
+          {result.usage && <span>Tokens: {result.usage.inputTokens} / {result.usage.outputTokens}</span>}
         </div>
       </div>
     );
@@ -230,15 +321,11 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string, title: st
   return null;
 };
 
-// Helper for formatting ms to mm:ss
-function formatTime(ms: number) {
+function formatTime(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-  
-  if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  }
+  if (hours > 0) return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
