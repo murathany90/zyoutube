@@ -250,18 +250,19 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
         });
       }
 
-      const contentType = response.headers.get('content-type') || '';
-      if (contentType.includes('text/html')) {
-        throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı alınamadı: CAPTION_RESPONSE_HTML', {
-          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'HTML_REJECTED'
-        });
-      }
-
       rawText = await response.text();
 
       if (!rawText || !rawText.trim()) {
         throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı sunucudan boş döndü.', {
           expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'EMPTY_BODY'
+        });
+      }
+
+      // Body sniffing: reject HTML pages (e.g. login wall, consent page)
+      const trimmed = rawText.trim();
+      if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.startsWith('<HTML')) {
+        throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı alınamadı: Sayfa HTML döndürdü.', {
+          expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'CAPTION_RESPONSE_HTML'
         });
       }
     } catch (e: any) {

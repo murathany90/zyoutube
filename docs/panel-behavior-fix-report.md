@@ -85,6 +85,21 @@ tests/panel-behavior.spec.ts (yeni): 7/7 passed
   - Panel sağ sütunda, video altında değil
 ```
 
+## Ek Düzeltme: CAPTION_RESPONSE_HTML (Transkript Yüklenmeme Sorunu)
+
+**Hata:** Gerçek YouTube videolarında transkript yüklenmiyor, hata: `Altyazı alınamadı: CAPTION_RESPONSE_HTML`
+
+**Kök Neden:** `FETCH_CAPTION` mesajı altyazı fetch'ini service worker üzerinden yapıyordu. Service worker'ın YouTube oturum çerezi (cookie) olmadığı için YouTube, timedtext API isteğine HTML hata sayfası döndürüyordu. Content-type kontrolü (`text/html`) bu yanıtı reddediyordu.
+
+**Çözüm:** Altyazı fetch'i content script'e taşındı. Content script'in YouTube çerezlerine erişimi olduğu için YouTube doğru caption verisini döndürüyor.
+
+Değişiklikler:
+- `sendRuntimeMessage('FETCH_CAPTION', ...)` → `fetch(safeUrl)` (doğrudan content script'ten)
+- `validateCaptionUrl()` metodu eklendi: hostname allowlist (`youtube.com`, `googlevideo.com`), HTTPS zorunluluğu, URL kimlik bilgisi kontrolü
+- Content-type `text/html` kontrolü korundu (güvenlik katmanı)
+- `AbortController` desteği korundu
+- `FETCH_CAPTION` handler'ı `message-router.ts`'de artık ölü kod (kullanılmıyor)
+
 ## Değişen Dosyalar
 
 | Dosya | Değişiklik |
@@ -92,6 +107,7 @@ tests/panel-behavior.spec.ts (yeni): 7/7 passed
 | `src/content/index.tsx` | Button kodu silindi, `YouTubePanelManager` yeniden yazıldı, `panelEnabled` kontrollü panel yönetimi |
 | `src/background/index.ts` | `onInstalled`'da `panelEnabled: true` varsayılanı eklendi |
 | `src/popup/index.tsx` | İki toggle → tek "Eklenti Aktif" toggle; broadcast `START_EXTENSION`/`STOP_EXTENSION` |
+| `src/transcript/youtube-provider.ts` | `sendRuntimeMessage` → doğrudan `fetch()` + URL validasyonu |
 | `tests/e2e.spec.ts` | Button beklentileri kaldırıldı, panel auto-open, tek panel, ikon yok kontrolleri eklendi |
 | `tests/extension.spec.ts` | Button beklentileri kaldırıldı, panel auto-open, tek panel kontrolleri eklendi |
 | `tests/privacy/privacy.spec.ts` | Button beklentileri kaldırıldı, otomatik açılan panel kullanılıyor |
