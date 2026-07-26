@@ -8,7 +8,6 @@ export type SummaryEngine = 'gemini-gem' | 'openai-compatible' | 'chrome-local';
 
 export interface GemSettings {
   gemUrl: string;
-  useExistingTab: boolean;
   tryBackgroundTab: boolean;
   fallbackToVisibleTab: boolean;
   autoCloseTab: boolean;
@@ -19,7 +18,6 @@ export interface GemSettings {
 
 export const DEFAULT_GEM_SETTINGS: GemSettings = {
   gemUrl: '',
-  useExistingTab: true,
   tryBackgroundTab: true,
   fallbackToVisibleTab: true,
   autoCloseTab: false,

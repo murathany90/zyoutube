@@ -264,7 +264,7 @@ const Popup = () => {
 
             <div style={sectionTitle}>Çalışma Seçenekleri</div>
             <div style={{ background: 'var(--zy-card-bg, #fff)', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px' }}>
-              <Toggle label="Mevcut Gemini sekmesini kullan" checked={gemSettings.useExistingTab} onChange={v => saveGem({ ...gemSettings, useExistingTab: v })} />
+              <div style={{ height: '8px' }}></div>
               <Toggle label="Arka planda açmayı dene" checked={gemSettings.tryBackgroundTab} onChange={v => saveGem({ ...gemSettings, tryBackgroundTab: v })} />
               <Toggle label="Başarısızsa görünür sekmede aç" checked={gemSettings.fallbackToVisibleTab} onChange={v => saveGem({ ...gemSettings, fallbackToVisibleTab: v })} />
               <Toggle label="İşlem bitince otomatik kapat" checked={gemSettings.autoCloseTab} onChange={v => saveGem({ ...gemSettings, autoCloseTab: v })} />

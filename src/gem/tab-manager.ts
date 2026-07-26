@@ -44,17 +44,6 @@ export class GemTabManager {
    * Yeni Gemini sekmesi aç veya mevcut olanı kullan.
    */
   static async openGemTab(gemUrl: string, settings: GemSettings): Promise<{ tabId: number; isNew: boolean }> {
-    // Mevcut sekmeyi kullanmayı dene
-    if (settings.useExistingTab) {
-      const existing = await this.findMatchingGemTab(gemUrl);
-      if (existing) {
-        // Aynı Gem URL ise güncelleme gerekmiyor, sadece aktifleştir
-        if (!settings.tryBackgroundTab) {
-          await chrome.tabs.update(existing.tabId, { active: true });
-        }
-        return { tabId: existing.tabId, isNew: false };
-      }
-    }
 
     // Yeni sekme aç
     const tab = await chrome.tabs.create({

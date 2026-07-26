@@ -1,13 +1,13 @@
 # Live YouTube Transcript Test Results (Real Chrome via CDP)
 
-Date: 2026-07-26T10:21:49.931Z
-Git SHA: 126661112f9a1eb8c4277b01439673d81bc6dc99
+Date: 2026-07-26T10:40:31.439Z
+Git SHA: 97438f10c887fe92bc07989474c47272343b1891
 CDP: http://127.0.0.1:9222
 
-## Turkish content (8jPQjjsBbIc)
+## Gangnam Style (auto captions) (9bZkp7q19f0)
 
 - **Title:** 
-      How to stay calm when you know you'll be stressed | Daniel Levitin | TED
+      PSY - GANGNAM STYLE(강남스타일) M/V
     
 - **Segment count:** 0
 - **First 100 chars:** ``
