@@ -150,46 +150,16 @@ export class OpenAICompatibleProvider implements AIProvider {
     try {
       if (context.onProgress) context.onProgress('Özetleniyor...', 50);
 
-      const doFetch = async (retryCount: number = 0): Promise<Response> => {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.apiKey}`,
-            ...config.customHeaders
-          },
-          body: JSON.stringify(body),
-          signal: controller.signal
-        });
-
-        // 429 Rate Limit için tek seferlik retry
-        if (response.status === 429 && retryCount < 1) {
-          const retryAfterHeader = response.headers.get('retry-after');
-          const retryAfterMs = retryAfterHeader
-            ? (parseInt(retryAfterHeader, 10) || 10) * 1000
-            : 10000; // Default 10 saniye
-          const waitMs = Math.min(retryAfterMs, 30000); // Max 30s bekle
-          
-          if (context.onProgress) {
-            context.onProgress(`Rate limit aşıldı, ${Math.ceil(waitMs/1000)}s sonra yeniden deneniyor...`, 30);
-          }
-          await new Promise(r => setTimeout(r, waitMs));
-          return doFetch(retryCount + 1);
-        }
-
-        // 503 Service Unavailable için tek seferlik retry
-        if (response.status === 503 && retryCount < 1) {
-          if (context.onProgress) {
-            context.onProgress('Sunucu meşgul, 5s sonra yeniden deneniyor...', 30);
-          }
-          await new Promise(r => setTimeout(r, 5000));
-          return doFetch(retryCount + 1);
-        }
-
-        return response;
-      };
-
-      const response = await doFetch();
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${config.apiKey}`,
+          ...config.customHeaders
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
 
       clearTimeout(timeoutId);
 
@@ -268,7 +238,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         throw new AIProviderError({
           code: isTimeout ? 'REQUEST_TIMEOUT' : 'REQUEST_CANCELLED',
           userMessage: isTimeout 
-            ? `İstek ${Math.round(timeoutMs/1000)} saniye sonra zaman aşımına uğradı. Daha kısa bir transkript veya daha hızlı bir model deneyebilirsiniz.`
+            ? 'API isteği 180 saniye içinde tamamlanamadı. Daha kısa bir transkript veya farklı bir model deneyin.'
             : 'İstek iptal edildi.',
           retryable: isTimeout,
           providerId: this.id,

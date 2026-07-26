@@ -17,7 +17,33 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
   const [isProcessing, setIsProcessing] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
   const activeTaskIdRef = useRef<string | null>(null);
+  const watchdogTimerRef = useRef<number | null>(null);
   const [currentTranscript, setCurrentTranscript] = useState<TranscriptSegment[] | null>(null);
+
+  const clearWatchdog = () => {
+    if (watchdogTimerRef.current) {
+      window.clearTimeout(watchdogTimerRef.current);
+      watchdogTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (isProcessing) {
+      clearWatchdog();
+      watchdogTimerRef.current = window.setTimeout(() => {
+        setIsProcessing(false);
+        setStatus('failed');
+        setError('API isteği tamamlanamadı veya arka plan yanıtı alınamadı. Lütfen tekrar deneyin.');
+        if (activeTaskIdRef.current) {
+          sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId: activeTaskIdRef.current }).catch(() => {});
+          activeTaskIdRef.current = null;
+        }
+      }, 195000);
+    } else {
+      clearWatchdog();
+    }
+    return () => clearWatchdog();
+  }, [isProcessing]);
 
   const [selectedEngine, setSelectedEngine] = useState<SummaryEngine>('gemini-gem');
   const [selectedLength, setSelectedLength] = useState<'short' | 'standard' | 'detailed'>('standard');
@@ -118,14 +144,14 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
       activeTaskIdRef.current = request.taskId;
       setProgressMessage(selectedEngine === 'gemini-gem' ? 'Gemini Gem başlatılıyor...' : 'AI Sağlayıcı aranıyor...');
 
-      sendRuntimeMessage({
+      const startResponse = await sendRuntimeMessage({
         type: 'START_SUMMARY',
         request,
-      }).catch((err) => {
-        setError(err.message || 'Başlatma başarısız oldu.');
-        setIsProcessing(false);
-        setStatus('failed');
       });
+
+      if (!startResponse?.success) {
+        throw new Error(startResponse?.error || 'Özet görevi başlatılamadı.');
+      }
     } catch (e: any) {
       let msg = e.message || 'Transkript çekilemedi.';
       if (e.diagnostics) {

@@ -11,6 +11,7 @@ export interface AIProviderConfig {
   timeoutMs?: number;
   temperature?: number;
   maxTokens?: number;
+  contextWindowTokens?: number;
   customHeaders?: Record<string, string>;
   isSessionStorage?: boolean;
   responseMode?: 'markdown' | 'json';
@@ -38,6 +39,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
       baseUrl: 'https://api.deepseek.com/v1',
       timeoutMs: 30000,
       temperature: 0.7,
+      contextWindowTokens: 130000,
       isSessionStorage: false
     },
     'chrome-local': {

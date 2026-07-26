@@ -343,7 +343,7 @@ const Popup = () => {
 
             <div style={{ background: 'var(--zy-card-bg, #fff)', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                <button onClick={() => updateProviderDraft({ baseUrl: 'https://integrate.api.nvidia.com/v1', model: 'deepseek-ai/deepseek-v4-flash', maxTokens: 16384 })}
+                <button onClick={() => updateProviderDraft({ baseUrl: 'https://integrate.api.nvidia.com/v1', model: 'deepseek-ai/deepseek-v4-flash', maxTokens: 16384, contextWindowTokens: 130000 })}
                   style={{
                     flex: 1, padding: '6px', background: '#ecfccb', border: '1px solid #bef264',
                     color: '#4d7c0f', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer',
@@ -383,6 +383,19 @@ const Popup = () => {
                     <option value="markdown">Markdown</option>
                     <option value="json">JSON Object</option>
                   </select>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Model bağlam limiti</label>
+                  <input type="number" style={inputStyle}
+                    value={draftProvider?.contextWindowTokens ?? 130000}
+                    onChange={e => {
+                      const val = parseInt(e.target.value);
+                      updateProviderDraft({ contextWindowTokens: (isNaN(val) || val < 4000) ? 130000 : val });
+                    }}
+                    placeholder="130000"
+                  />
                 </div>
               </div>
               <Toggle label="Yalnızca oturum boyunca sakla"
@@ -427,6 +440,10 @@ const Popup = () => {
                   {testStatus.aiResponse && <div style={{ marginTop: '4px', fontStyle: 'italic', opacity: 0.9 }}>AI Yanıtı: "{testStatus.aiResponse}"</div>}
                 </div>
               )}
+              
+              <div style={{ marginTop: '12px', padding: '8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: '11px', color: '#64748b', lineHeight: 1.4 }}>
+                API özetleri tek istekte gönderilir. En fazla 130.000 tokenlık bağlam kullanılır. Uzun transkriptler segment sınırında kısaltılır.
+              </div>
             </div>
           </div>
         )}
