@@ -297,32 +297,44 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
     let lastError: string | undefined;
     let panelSegments: TranscriptSegment[] | null = null;
 
-    // Phase 1: Try direct content-script fetch with each format
-    for (const fmt of this.FORMATS) {
-      try {
-        const fetchUrl = this.buildCaptionUrl(track.baseUrl, fmt);
-        this.validateCaptionUrl(fetchUrl);
-        const result = await this.tryFetchCaption(fetchUrl, abortController?.signal);
-        if (result !== null) {
-          rawText = result;
-          usedFormat = fmt || '(default XML)';
-          break;
+    // Phase 1: First try to scrape native YouTube transcript panel
+    console.warn('ZYouTube [Transcript] Trying to scrape native transcript panel...');
+    panelSegments = await this.scrapeTranscriptPanel(videoId);
+    if (panelSegments && panelSegments.length > 0) {
+      usedFormat = 'transcript-panel';
+    } else {
+      lastError = 'TRANSCRIPT_PANEL_FAILED';
+    }
+
+    // Phase 2: If scraping failed, try direct content-script fetch
+    if (!usedFormat) {
+      console.warn('ZYouTube [Transcript] Native scraping failed, trying direct content-script fetch...');
+      for (const fmt of this.FORMATS) {
+        try {
+          const fetchUrl = this.buildCaptionUrl(track.baseUrl, fmt);
+          this.validateCaptionUrl(fetchUrl);
+          const result = await this.tryFetchCaption(fetchUrl, abortController?.signal);
+          if (result !== null) {
+            rawText = result;
+            usedFormat = fmt || '(default XML)';
+            break;
+          }
+          lastError = `EMPTY_BODY_${fmt || 'default'}`;
+        } catch (e: any) {
+          if (e.name === 'AbortError') {
+            throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı isteği iptal edildi.', {
+              expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'FETCH_ABORTED'
+            });
+          }
+          if (e instanceof TranscriptError) throw e;
+          lastError = e.message;
         }
-        lastError = `EMPTY_BODY_${fmt || 'default'}`;
-      } catch (e: any) {
-        if (e.name === 'AbortError') {
-          throw new TranscriptError('CAPTION_FETCH_FAILED', 'Altyazı isteği iptal edildi.', {
-            expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'FETCH_ABORTED'
-          });
-        }
-        if (e instanceof TranscriptError) throw e;
-        lastError = e.message;
       }
     }
 
-    // Phase 2: If direct fetch failed, try via background MAIN world
-    if (rawText === null) {
-      console.warn('ZYouTube [Transcript] Direct content-script fetch failed, trying MAIN world via background...');
+    // Phase 3: Try via background MAIN world
+    if (rawText === null && !usedFormat) {
+      console.warn('ZYouTube [Transcript] Direct fetch failed, trying MAIN world via background...');
       for (const fmt of this.FORMATS) {
         try {
           const result = await this.fetchCaptionViaBackground(track, videoId, fmt, abortController?.signal);
@@ -341,17 +353,6 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
           if (e instanceof TranscriptError) throw e;
           lastError = `BACKGROUND_ERROR_${fmt || 'default'}: ${e.message}`;
         }
-      }
-    }
-
-    // Phase 3: Last resort - scrape YouTube transcript panel
-    if (rawText === null) {
-      console.warn('ZYouTube [Transcript] MAIN world fetch also failed, trying transcript panel scraping...');
-      panelSegments = await this.scrapeTranscriptPanel(videoId);
-      if (panelSegments && panelSegments.length > 0) {
-        usedFormat = 'transcript-panel';
-      } else {
-        lastError = 'TRANSCRIPT_PANEL_FALLBACK_FAILED';
       }
     }
 

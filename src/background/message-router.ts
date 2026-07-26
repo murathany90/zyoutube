@@ -312,67 +312,119 @@ async function fetchCaptionFromMainWorldInjected(captionUrl: string, format: str
 }
 
 async function scrapeTranscriptPanelInjected(): Promise<{ success: boolean; segments?: Array<{ startTimeMs: number; endTimeMs: number; durationMs: number; text: string; languageCode: string }>; error?: string }> {
+  const _log: string[] = [];
+  const _w = (m: string) => { _log.push(m); console.log('ZYouTube Scrape:', m); };
+
+  const getSegments = () => {
+    let cues = document.querySelectorAll('transcript-segment-view-model, ytd-transcript-segment-renderer');
+    return Array.from(cues);
+  };
+
   try {
-    const segments: Array<{ startTimeMs: number; endTimeMs: number; durationMs: number; text: string; languageCode: string }> = [];
+    _w('Starting scraping...');
 
-    // Try to open transcript panel via YouTube's internal API
-    const player = document.getElementById('movie_player') as any;
-    if (player && typeof player.loadModule === 'function') {
-      player.loadModule('transcript');
-    }
+    // Step 1: Read already open native segments
+    let segmentsNodes = getSegments();
+    if (segmentsNodes.length > 0) {
+      _w('Segments already open, skipping click.');
+    } else {
+      // Step 2: Click Native "Show transcript" button
+      _w('Step 2: Looking for native transcript button...');
 
-    // Wait for transcript panel to appear
-    await new Promise<void>((resolve) => {
-      let attempts = 0;
-      const check = () => {
-        const panel = document.querySelector('ytd-transcript-renderer, #transcript-panel, ytd-video-description-transcript-section-renderer');
-        if (panel) {
-          resolve();
-          return;
-        }
-        attempts++;
-        if (attempts > 50) {
-          resolve();
-          return;
-        }
-        setTimeout(check, 200);
-      };
-      check();
-    });
-
-    // If no panel, try clicking the "..." button to open transcript
-    let panel = document.querySelector('ytd-transcript-renderer');
-    if (!panel) {
-      const moreButton = document.querySelector('ytd-video-secondary-info-renderer #expand-button, #description-container #expand');
-      if (moreButton) {
-        (moreButton as HTMLElement).click();
+      // We might need to expand description first
+      const expandBtn = document.querySelector('tp-yt-paper-button#expand, ytd-text-inline-expander tp-yt-paper-button, #expand-sizer');
+      let descriptionWasExpanded = true;
+      if (expandBtn && expandBtn.closest('ytd-text-inline-expander')?.hasAttribute('is-collapsed')) {
+        descriptionWasExpanded = false;
+        (expandBtn as HTMLElement).click();
+        _w('Expanded description');
+        await new Promise(r => setTimeout(r, 1000));
       }
-      await new Promise(r => setTimeout(r, 1000));
-      const menuItem = Array.from(document.querySelectorAll('ytd-menu-service-item-renderer')).find(el => el.textContent?.includes('Show transcript') || el.textContent?.includes('Transkripti göster'));
-      if (menuItem) {
-        (menuItem as HTMLElement).click();
+
+      // Search for the button
+      const searchAreas = document.querySelectorAll('ytd-video-description-transcript-section-renderer, #structured-description, ytd-watch-metadata, ytd-menu-popup-renderer');
+      let transcriptBtn: HTMLElement | null = null;
+
+      for (const area of Array.from(searchAreas)) {
+        const btns = area.querySelectorAll('button, tp-yt-paper-button, yt-button-shape, .yt-spec-button-shape-next');
+        for (const btn of Array.from(btns)) {
+          const text = (btn.textContent || btn.getAttribute('aria-label') || '').trim().toLowerCase();
+          if (text.includes('transkripti göster') || text.includes('show transcript') || (text.includes('transcript') && !text.includes('search')) || (text.includes('transkript') && !text.includes('ara'))) {
+            transcriptBtn = btn as HTMLElement;
+            break;
+          }
+        }
+        if (transcriptBtn) break;
       }
-      await new Promise(r => setTimeout(r, 2000));
+
+      if (transcriptBtn) {
+        _w(`Found native transcript button: ${transcriptBtn.tagName} / ${transcriptBtn.className}`);
+        transcriptBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await new Promise(r => setTimeout(r, 200)); // give it a moment to scroll
+        transcriptBtn.click();
+        
+        // Also dispatch a mousedown/mouseup to be safe for polymer
+        transcriptBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        transcriptBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+
+        // Wait for segments
+        let waitTime = 0;
+        while (waitTime < 10000) {
+          await new Promise(r => setTimeout(r, 500));
+          waitTime += 500;
+
+          // Check for PAyouchat and reject/close
+          const youchat = document.querySelector('ytd-engagement-panel-section-list-renderer[target-id="PAyouchat"], ytd-engagement-panel-section-list-renderer[target-id="PAask"]');
+          if (youchat && youchat.getAttribute('visibility') === 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED') {
+            _w('Rejected PAyouchat/PAask panel');
+            // Try to close it
+            const closeBtn = youchat.querySelector('button[aria-label="Close"], #close-button button, .yt-spec-button-shape-next[aria-label*="Close"]');
+            if (closeBtn) (closeBtn as HTMLElement).click();
+          }
+
+          segmentsNodes = getSegments();
+          if (segmentsNodes.length > 0) {
+            _w(`Found ${segmentsNodes.length} segments`);
+            break;
+          }
+        }
+      } else {
+         _w('Native transcript button not found in description');
+      }
+
+      // Revert description expansion if we expanded it
+      if (!descriptionWasExpanded) {
+        const collapseBtn = document.querySelector('tp-yt-paper-button#collapse');
+        if (collapseBtn) {
+          (collapseBtn as HTMLElement).click();
+          _w('Collapsed description');
+        }
+      }
     }
 
-    panel = document.querySelector('ytd-transcript-renderer');
-    if (!panel) {
-      return { success: false, error: 'PANEL_NOT_FOUND' };
+    // Step 3: Extract segments
+    if (segmentsNodes.length === 0) {
+       segmentsNodes = getSegments();
     }
 
-    const cueGroups = panel.querySelectorAll('ytd-transcript-segment-renderer');
-    if (!cueGroups || cueGroups.length === 0) {
+    if (segmentsNodes.length === 0) {
+      _w('TRANSCRIPT_PANEL_FALLBACK_FAILED');
+      (window as any).__zyoutube_scrape_log__ = _log;
       return { success: false, error: 'NO_SEGMENTS' };
     }
 
-    const langEl = panel.querySelector('ytd-transcript-renderer .language-option, #transcript-panel select option[selected]');
-    const languageCode = langEl?.getAttribute('value') || langEl?.textContent?.trim() || 'unknown';
+    _w('Step 4: Extracting language...');
+    const langEl = document.querySelector('.language-option, #language-menu, ytd-transcript-renderer #header, .ytd-transcript-renderer #header');
+    const languageCode = langEl?.textContent?.trim() || 'unknown';
 
-    cueGroups.forEach((cue, index) => {
-      const timeEl = cue.querySelector('.segment-timestamp, .time, [role="button"]');
-      const textEl = cue.querySelector('.segment-text, .text, .segment');
+    _w(`Step 5: Extracting ${segmentsNodes.length} segments...`);
+    const segments: Array<{ startTimeMs: number; endTimeMs: number; durationMs: number; text: string; languageCode: string }> = [];
 
-      let startTimeMs = index * 1000;
+    segmentsNodes.forEach((cue, index) => {
+      const timeEl = cue.querySelector('.segment-timestamp, .ytwTranscriptSegmentViewModelTimestamp, .timestamp, .time, [role="button"], #timestamp');
+      const textEl = cue.querySelector('.segment-text, .ytAttributedStringHost, .text, .segment, #text, yt-formatted-string');
+
+      let startTimeMs = 0;
       if (timeEl) {
         const timeStr = timeEl.textContent?.trim() || '';
         const parts = timeStr.split(':');
@@ -383,23 +435,46 @@ async function scrapeTranscriptPanelInjected(): Promise<{ success: boolean; segm
         }
       }
 
-      const text = textEl?.textContent?.trim() || cue.textContent?.trim() || '';
+      let text = '';
+      if (textEl) {
+        text = textEl.textContent?.trim() || '';
+      }
+      if (!text) {
+        text = cue.textContent?.replace(/[0-9:]+/g, '').trim() || '';
+      }
 
-      segments.push({
-        startTimeMs,
-        endTimeMs: startTimeMs + 2000,
-        durationMs: 2000,
-        text,
-        languageCode,
-      });
+      let endTimeMs = startTimeMs + 2000;
+      if (index < segmentsNodes.length - 1) {
+        const nextTimeEl = segmentsNodes[index + 1].querySelector('.segment-timestamp, .ytwTranscriptSegmentViewModelTimestamp, .timestamp, .time, [role="button"], #timestamp');
+        if (nextTimeEl) {
+          const nextTimeStr = nextTimeEl.textContent?.trim() || '';
+          const nextParts = nextTimeStr.split(':');
+          let nextStartMs = 0;
+          if (nextParts.length === 2) {
+            nextStartMs = (parseInt(nextParts[0]) * 60 + parseFloat(nextParts[1])) * 1000;
+          } else if (nextParts.length === 3) {
+            nextStartMs = (parseInt(nextParts[0]) * 3600 + parseInt(nextParts[1]) * 60 + parseFloat(nextParts[2])) * 1000;
+          }
+          if (nextStartMs > startTimeMs) endTimeMs = nextStartMs;
+        }
+      }
+
+      const durationMs = endTimeMs - startTimeMs;
+      if (text) {
+        segments.push({ startTimeMs, endTimeMs, durationMs, text, languageCode });
+      }
     });
 
+    _w(`Extracted ${segments.length} non-empty segments`);
     if (segments.length === 0) {
+      (window as any).__zyoutube_scrape_log__ = _log;
       return { success: false, error: 'NO_SEGMENTS' };
     }
 
+    (window as any).__zyoutube_scrape_log__ = _log;
     return { success: true, segments };
   } catch (e: any) {
+    (window as any).__zyoutube_scrape_log__ = _log;
     return { success: false, error: e.message || 'SCRAPE_ERROR' };
   }
 }

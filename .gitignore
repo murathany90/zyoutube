@@ -6,3 +6,4 @@ playwright-report/
 playwright/.cache/
 *.cjs
 *.log
+test-chrome-profile/
