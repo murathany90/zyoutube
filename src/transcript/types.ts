@@ -6,6 +6,7 @@ export interface TranscriptSegment {
   durationMs: number;
   text: string;
   cleanText: string;
+  secondaryText?: string;
   languageCode: string;
 }
 
@@ -95,5 +96,5 @@ export interface TranscriptResult {
 
 export interface ITranscriptProvider {
   getAvailableTracks(videoId: string): Promise<CaptionTrack[]>;
-  fetchTranscript(videoId: string, track: CaptionTrack, abortController?: AbortController): Promise<TranscriptResult>;
+  fetchTranscript(videoId: string, track: CaptionTrack, abortController?: AbortController, tlang?: string): Promise<TranscriptResult>;
 }

@@ -133,11 +133,21 @@ const Panel = ({ videoId, isInvalidated }: { videoId: string; isInvalidated: boo
             overflowY: 'auto',
             padding: '12px',
           }}>
-            {activeTab === 'summary' && <SummaryTab videoId={videoId} title={title} url={url} />}
-            {activeTab === 'transcript' && <TranscriptTab videoId={videoId} />}
-            {activeTab === 'keyideas' && <div style={{ color: '#9ca3af', fontSize: '13px', padding: '20px', textAlign: 'center' }}>Yakında...</div>}
-            {activeTab === 'ask' && <div style={{ color: '#9ca3af', fontSize: '13px', padding: '20px', textAlign: 'center' }}>Yakında...</div>}
-            {activeTab === 'learn' && <div style={{ color: '#9ca3af', fontSize: '13px', padding: '20px', textAlign: 'center' }}>Yakında...</div>}
+            <div style={{ display: activeTab === 'summary' ? 'block' : 'none' }}>
+              <SummaryTab videoId={videoId} title={title} url={url} />
+            </div>
+            <div style={{ display: activeTab === 'transcript' ? 'block' : 'none' }}>
+              <TranscriptTab videoId={videoId} />
+            </div>
+            <div style={{ display: activeTab === 'keyideas' ? 'block' : 'none', color: '#9ca3af', fontSize: '13px', padding: '20px', textAlign: 'center' }}>
+              Yakında...
+            </div>
+            <div style={{ display: activeTab === 'ask' ? 'block' : 'none', color: '#9ca3af', fontSize: '13px', padding: '20px', textAlign: 'center' }}>
+              Yakında...
+            </div>
+            <div style={{ display: activeTab === 'learn' ? 'block' : 'none', color: '#9ca3af', fontSize: '13px', padding: '20px', textAlign: 'center' }}>
+              Yakında...
+            </div>
           </div>
         </>
       )}

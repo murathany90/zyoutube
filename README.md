@@ -1,26 +1,54 @@
-# ZYouTube - AI Destekli Akıllı YouTube Özet Eklentisi (Manifest V3)
+# ZYouTube - AI Destekli Akıllı YouTube Özet ve Transkript Eklentisi (Manifest V3)
 
-ZYouTube, React, Vite, TypeScript ve TailwindCSS kullanılarak geliştirilmiş, doğrudan YouTube video sayfası içerisine enjekte edilen gelişmiş bir yapay zeka destekli video özetleme ve transkript eklentisidir.
+ZYouTube, React, Vite, TypeScript ve TailwindCSS kullanılarak geliştirilmiş, doğrudan YouTube video sayfası içerisine enjekte edilen gelişmiş bir yapay zeka destekli video özetleme ve interaktif transkript eklentisidir. Uzun eğitim videoları, podcast'ler veya teknoloji incelemeleri gibi içeriklerde zaman kazanmak ve aranan bilgiye anında ulaşmak için tasarlanmıştır.
 
 ## 🚀 Proje Vizyonu ve Amacı
 
 Modern dünyada bilgi tüketimi inanılmaz bir hıza ulaştı. YouTube üzerinde her gün milyonlarca saatlik eğitim, podcast ve teknoloji videoları yayınlanıyor. ZYouTube, uzun videoları izlemek için zamanı olmayan, sadece kritik bilgilere erişmek isteyen veya video içinde geçen spesifik bir bilgi parçasını (örneğin 1 saatlik bir yayındaki 2 dakikalık bir kod parçasını) arayan kullanıcılar için geliştirilmiştir.
 
-ZYouTube, **Chrome Extension Manifest V3** altyapısını kullanarak, YouTube'un karmaşık ve sürekli değişen DOM yapısına entegre olur. Videonun altyazılarını (transcript) saniyeler içinde çeker, bu veriyi parçalara böler ve Gemini API'sine göndererek kullanıcının anlayabileceği akıcı bir özet çıkartır.
+ZYouTube, **Chrome Extension Manifest V3** altyapısını kullanarak, YouTube'un karmaşık ve sürekli değişen DOM yapısına entegre olur. Videonun altyazılarını (transcript) saniyeler içinde çeker, bu veriyi parçalara böler ve seçili yapay zeka API'sine göndererek kullanıcının anlayabileceği akıcı bir özet çıkartır. Ayrıca videoyla senkronize akan, kullanıcı dostu bir transkript okuyucu sunar.
 
 ---
 
 ## 🛠️ Temel Özellikler
 
-1. **Doğrudan Arayüz Entegrasyonu:** Chrome Side Panel yerine doğrudan YouTube oynatıcısının yanındaki ikincil sütuna (`#secondary`) "AI Özet" paneli enjekte edilir. Bu sayede videoyu izlerken özet ve transkript sekmelerine kesintisiz erişebilirsiniz.
-2. **Akıllı Parçalama (Chunking):** Çok uzun videoların transkriptleri, yapay zekanın token sınırlarını aşmamak için akıllıca birleştirilir veya filtrelenir.
-3. **Güvenli AI Sağlayıcıları:**
-   - **Gemini Gem Web Otomasyonu:** Gemini API kullanmak yerine, tarayıcınızda açık olan Google/Gemini oturumunu kullanır ve belirlediğiniz Gemini Gem URL'si üzerinden web otomasyonu ile özet çıkarır.
-   - **OpenAI Uyumlu API:** Kendi API anahtarınızı (DeepSeek, LMStudio vb.) kullanarak özet alabilirsiniz.
-   - **Chrome Yerel AI:** Destekleyen tarayıcılarda `window.ai` üzerinden tamamen yerel özetleme yapar.
-4. **Gelişmiş Transkript Yakalama:** İzole edilmiş Content Script sınırlarını aşarak YouTube oynatıcısının verisine `executeScript({ world: 'MAIN' })` üzerinden doğrudan erişir. Otomatik oluşturulmuş ve elle eklenmiş altyazıları kusursuz ayrıştırır.
-5. **Karanlık / Aydınlık Mod Desteği:** YouTube'un mevcut temasıyla senkronize çalışır, göz yormaz.
-6. **Güvenli Ayarlar Yönetimi:** Kullanıcının API anahtarı `chrome.storage.local` üzerinde güvenle şifrelenerek tutulur. İstekler Background Service Worker üzerinden atılır. API key gibi hassas bilgiler DOM'a sızdırılmaz.
+### 1. Dinamik ve Native Arayüz Entegrasyonu
+ZYouTube, ayrı bir sayfa veya hantal bir yan panel açmak yerine doğrudan YouTube oynatıcısının altındaki araç çubuğuna ("Beğen", "Paylaş" gibi) şık bir **"AI Özet"** butonu ekler. Tıklandığında, sayfanın sağ tarafındaki ikincil sütuna (`#secondary`) entegre bir panel açılır. Bu panel videonun orijinal akışını bozmaz, YouTube'un Karanlık / Aydınlık temalarına kusursuz uyum sağlar.
+
+### 2. Gelişmiş Transkript (Altyazı) Yakalama Motoru
+YouTube'un altyazı sistemleri zaman zaman bot korumaları (Botguard / PoToken) veya yaş kısıtlamaları ile korunmaktadır. ZYouTube, bu zorlukları aşmak için katmanlı bir (fallback) mimari kullanır:
+- **Faz 1 (Yerel DOM Okuma):** Eğer API üzerinden veri çekilemezse, YouTube'un kendi native altyazı panelini (DOM üzerinde) bulur, açar, okur ve gizlice tekrar kapatır. Bu sayede hiçbir Botguard korumasına takılmadan güncel altyazıyı çeker.
+- **Faz 2 (Content Script API Fetch):** Videonun `ytInitialPlayerResponse` objesindeki şifreli URL'leri ayrıştırarak doğrudan kullanıcı oturumu üzerinden hızlıca çeker.
+- **Faz 3 (Background API Fetch):** Eğer Content Script başarısız olursa, işlemi arka plandaki (Service Worker) Main World üzerinden dener.
+- **Çeviri ve Fallback:** Kullanıcı farklı bir dil seçtiğinde (örneğin orijinali İngilizce olan videoda Türkçe istenmesi), doğrudan API'den çeviri istenir. Eğer YouTube API çeviriyi engellerse, sistem çökmez; otomatik olarak yerel DOM paneline geri döner ve kullanıcıya "Çeviri engellendi, orijinal dil gösteriliyor" şeklinde şeffaf bir uyarı sunar.
+
+### 3. İnteraktif Transkript Arayüzü (Auto-Sync)
+Eklenti, videonun süresiyle eş zamanlı olarak akan (Auto-Sync) bir transkript sekmesi sunar:
+- **Zaman Damgaları (Timestamps):** Her cümlenin yanındaki zaman damgasına tıklayarak videoyu o saniyeye sardırabilirsiniz.
+- **Otomatik Kaydırma:** Video oynatıldıkça, okunan cümle vurgulanır (highlight) ve panel otomatik olarak aşağı kayar.
+- **Okunabilirlik Modları:** Açık veya koyu arkaplanlarda okunabilirliği artırmak için punto büyütme/küçültme ve zaman damgalarını gizleme opsiyonları bulunur.
+- **Gelişmiş Arama:** Transkriptin içinde saniyeler içinde metin araması yapılabilir ve bulunan kelime videoda anında bulunabilir.
+
+### 4. Akıllı Özetleme ve Yapay Zeka Modelleri
+
+ZYouTube, esnek bir yapay zeka entegrasyonu sunar. Kullanıcıların ihtiyaçlarına göre tamamen ücretsiz web otomasyonu veya profesyonel API kullanımı gibi seçenekler barındırır. Bu özellikler, eklenti arayüzündeki ⚙️ (Ayarlar) sekmesinden kolayca yapılandırılabilir.
+
+#### a) Gemini Web Otomasyonu (Ücretsiz ve Pratik)
+- **Nasıl Çalışır?:** Google'ın Gemini web arayüzünü (gemini.google.com) adeta bir API gibi kullanır. Siz "Özetle" tuşuna bastığınızda, arka planda gizli ve izole bir sekme açılır, çıkarılan transkript bu sekmeye bir prompt (komut) ile gönderilir, Gemini'nin yazdığı sonuç anlık olarak dinlenerek eklenti paneline yansıtılır. İşlem bitince arka plan sekmesi otomatik kapanır.
+- **Avantajları:** Resmi API kotası veya kredi kartı/ücretlendirme derdi yoktur. Tarayıcınızdaki aktif Google hesabınızı kullanır.
+- **Parametreler (Ayarlar):**
+  - **Kayıtlı Gemini Adresi (Zorunlu):** Tarayıcınızda halihazırda oturum açtığınız, kullanıma hazır bir Gemini sohbetinin linkini (Örn: `https://gemini.google.com/app/1234abcd`) buraya yapıştırmanız gerekir. Eklenti sürekli yeni URL'ler yaratmak yerine sizin tanımladığınız bu sabit odayı kullanır. Bu sayede Google'ın spam ve bot korumalarına (Captcha) takılmadan, doğal bir kullanıcıymış gibi güvenli şekilde özet çıkarır.
+
+#### b) OpenAI Uyumlu API Desteği (DeepSeek, LMStudio, Ollama vb.)
+- **Nasıl Çalışır?:** Bilgisayarında açık kaynaklı yerel (Local) modeller çalıştıranlar veya DeepSeek gibi maliyet-etkin dış API sağlayıcılarını tercih eden ileri düzey kullanıcılar içindir. Standart OpenAI REST API mimarisine uyan tüm uç noktaları (endpoint) destekler.
+- **Parametreler (Ayarlar):**
+  - **Base URL:** İstek atılacak API'nin kök adresi. Dış API'ler için örneğin `https://api.deepseek.com/v1`, yerel (LMStudio/Ollama) kullanımlar için `http://localhost:1234/v1` formatındadır.
+  - **Model ID:** Kullanılacak modelin kayıtlı tam adı (Örn: `deepseek-chat`, `mistral-7b`).
+  - **API Key:** Dış sağlayıcılar için gereken kimlik doğrulama anahtarı. *(Güvenlik: Bu anahtar kesinlikle dışarı sızmaz, sadece tarayıcınızın güvenli yerel hafızasında `chrome.storage.local` tutulur.)*
+
+#### c) Akıllı Parçalama (Chunking) Teknolojisi
+- Saatlerce süren videoların transkriptleri yapay zekanın "Bağlam Sınırı" (Context Limit) kapasitesini aşabilir. 
+- ZYouTube, bu gibi durumlarda metni tek parça göndermek yerine, kelime sayısını analiz ederek anlam bütünlüğünü bozmayacak mantıksal bloklara (chunk) böler ve işler. Yapay zeka yorulmadan en doğru özeti sunar.
 
 ---
 
@@ -28,56 +56,53 @@ ZYouTube, **Chrome Extension Manifest V3** altyapısını kullanarak, YouTube'un
 
 Proje, modern web teknolojilerinin gücünden faydalanarak modüler ve sürdürülebilir bir yapıda tasarlanmıştır:
 
-- **React 18 & TypeScript:** Eklentinin UI (Kullanıcı Arayüzü) katmanı tamamen React ile yazılmıştır. TypeScript sayesinde tip güvenliği sağlanarak çalışma zamanı hataları en aza indirilmiştir.
-- **Vite & CRXJS:** Derleme aracı olarak Vite, Chrome eklentisi entegrasyonu için CRXJS (Vite Plugin) kullanılmıştır. Hızlı derleme (HMR) ve Manifest V3 uyumluluğu sorunsuz sağlanmıştır.
-- **Shadow DOM:** Eklentinin stillerinin (CSS) YouTube'un varsayılan stilleriyle çakışmaması (CSS Bleeding) için Shadow DOM teknolojisi kullanılmıştır.
+- **React 18 & TypeScript:** UI katmanı tamamen React ile yazılmıştır. TypeScript sayesinde tip güvenliği sağlanarak çalışma zamanı hataları en aza indirilmiştir.
+- **Vite & CRXJS:** Derleme aracı olarak Vite, Chrome eklentisi entegrasyonu için CRXJS kullanılmıştır. Hızlı derleme (HMR) ve tam Manifest V3 uyumluluğu sağlanmıştır.
+- **Shadow DOM:** Eklentinin stillerinin (CSS / Tailwind) YouTube'un varsayılan stilleriyle çakışmaması (CSS Bleeding) için React bileşenleri tamamen Shadow DOM içine render edilir.
+- **Zustand:** Komponentler arası state yönetimi hafif ve hızlı olan Zustand ile sağlanmaktadır.
 
-### Modül Hiyerarşisi
+### Modül Hiyerarşisi (Klasör Yapısı)
 
-*   **`src/content/index.tsx`**: YouTube DOM'una enjekte edilen ana betiktir. `MutationObserver` kullanarak sayfa değişikliklerini dinler, "AI Özet" butonunu YouTube'un araç çubuğuna ekler ve tıklanıldığında React panelini `#secondary` (sağ panel) konteynerine monte eder.
-*   **`src/transcript/youtube-provider.ts`**: YouTube'un gizli `ytInitialPlayerResponse` objesini çözümleyerek videonun içindeki altyazı dosyalarının (caption tracks) URL'lerini çıkarır. İçerik betiği üzerinden doğrudan `fetch` atarak altyazı verisini alır.
-*   **`src/transcript/parser.ts`**: İndirilen ham transkript verisini (JSON3 veya XML formatında olabilir) parse ederek saniye saniye segmentlere böler.
-*   **`src/ai/`**: Yapay Zeka sağlayıcıları, JSON Response Parser, Prompt Builder ve Görev Yöneticisi (Task Manager).
-*   **`src/settings/`**: Konfigürasyon ve doğrulama işlemleri (Validation rules, Session vs. Local Storage kararları).
-*   **`src/background/index.ts`**: Service Worker arka plan betiğidir. Global sekme değişimlerini ve güvenli mesajlaşmaları yönetir.
-
----
-
-## 🔄 Son Gelişmeler ve Teknik Çözümler
-
-Eklentinin geliştirilmesi sürecinde, özellikle YouTube'un dinamik (SPA - Single Page Application) yapısından kaynaklı çeşitli zorluklar yaşanmış ve aşılmıştır:
-
-### 1. Dinamik Import ve Manifest V3 Sorunları
-Başlangıçta `content_script` içinde `await import('./parser')` gibi dinamik import modülleri kullanılıyordu. Vite bu kodları derlerken ayrı dosyalara (chunk) bölüyor ve Chrome Manifest V3 güvenlik politikaları gereği (`web_accessible_resources`) bu dosyaların dışarıdan yüklenmesini engelliyordu.
-**Çözüm:** Dinamik import'lar statik import'lara çevrilerek kodun tek bir bundle içinde derlenmesi sağlandı.
-
-### 2. Altyazı (Transcript) Fetch Problemi (Boş Dönen Yanıtlar)
-Altyazı verisini çekmek için istek `background` servisine yönlendiriliyordu. Ancak YouTube'un yaş kısıtlamalı, premium veya telif haklı bazı videolarında, çerezler (cookies) arka plan servisinden iletilemediği için sunucu HTTP 200 dönmesine rağmen gövdeyi boş (length: 0) yolluyordu. Bu da XML parse hatalarına neden oluyordu.
-**Çözüm:** Fetch işlemi `youtube-provider.ts` içerisine alınarak doğrudan içerik betiği (`content script`) üzerinden, yani doğrudan `youtube.com` context'inden yapıldı. Bu sayede kullanıcının mevcut YouTube çerezleri istekle beraber gönderilmiş oldu.
-
-### 3. YouTube UI ve Buton Kaybolma (Overflow) Sorunu
-YouTube, video altı butonlarını `#top-level-buttons-computed` adlı alanda tutar. "AI Özet" butonu bu listeye en son eleman olarak (`appendChild`) ekleniyordu. Ancak "NotebookLM", "Paylaş", "Soru" gibi çok fazla butona sahip kullanıcılarda veya dar ekranlarda, YouTube'un kendi Responsive tasarımı, taşan (overflow) butonları otomatik olarak kestiği veya gizlediği için buton görünmez oluyordu.
-Ayrıca YouTube, ikon boyutlarında sabitlik (24x24px) aradığı için, SVG ikonuna dışarıdan esnek boyut verildiğinde devasa siyah bir kare oluşuyordu.
-**Çözüm:** 
-- Buton listenin sonuna değil, her zaman görünür kalması için en başına (`insertBefore`) eklendi. (Gerekirse bu durum diğer elementleri analiz ederek güncellenebilir).
-- Buton ikonuna SVG içinden sabit `24px` değerleri verilerek YouTube UI standartlarına (yt-spec-button-shape-next) tam uyum sağlandı.
-
-### 4. Başka Eklentilerle Çakışma ve Yanıltıcı Loglar
-Kullanıcı testleri sırasında konsolda `[Auto Youtube Shorts Scroller] Object` ve `content.ts.44ce3ab9.js` şeklinde hatalar gözlemlendi. Bu durum ZYouTube'un hata verdiği yanılgısını yarattı.
-**Analiz:** Bu hataların tamamen kullanıcının tarayıcısındaki başka bir eklentiden kaynaklandığı ve ZYouTube projesinde hiçbir zaman `content.ts` isimli bir dosyanın veya Shorts modülünün bulunmadığı tespit edildi.
+*   **`src/content/`**: YouTube sayfasına enjekte edilen içerik betikleridir.
+    *   `index.tsx`: `MutationObserver` ile sayfa değişimlerini izler, YouTube araç çubuğuna "AI Özet" butonunu ekler ve `#secondary` içine React panelini gömer.
+    *   `TranscriptTab.tsx`: İnteraktif transkript okuyucunun arayüzü ve video senkronizasyon (auto-scroll) mantığı.
+*   **`src/transcript/`**: Transkript verilerini indiren, temizleyen ve parse eden çekirdek modüldür.
+    *   `youtube-provider.ts`: Katmanlı fetch (API, DOM Scrape, Background) işlemlerini yürütür.
+    *   `parser.ts`: Farklı YouTube formatlarını (JSON3, XML) saniye saniye ayrıştırıp ortak bir modele çevirir.
+*   **`src/ai/`**: Yapay Zeka orkestratörü. Web Otomasyonu ve API isteklerini aynı arayüz üzerinden yönetir.
+*   **`src/settings/`**: Kullanıcı tercihleri, seçili yapay zeka modelleri ve güvenlik validasyonlarını içerir.
+*   **`src/background/message-router.ts`**: Manifest V3'ün kısıtlamalarını aşmak için arka plan Service Worker'ında çalışan mesaj yönlendiricisi. `MAIN` world (ana sayfa bağlamı) ile izole edilmiş `ISOLATED` world arasında köprü kurar.
 
 ---
 
-## 🛠️ Kurulum ve Geliştirme
+## 🔄 Teknik Çözümler ve Aşılan Zorluklar
 
-Projeyi yerel bilgisayarınızda çalıştırmak için aşağıdaki adımları izleyin:
+Eklentinin geliştirilmesi sürecinde, YouTube'un SPA (Single Page Application) yapısından kaynaklı çeşitli zorluklar yaşanmış ve sofistike çözümler üretilmiştir:
+
+### 1. Botguard (PoToken) Korumasını Aşma
+YouTube yakın zamanda `exp=xpe` parametresi ile API isteklerine Botguard koruması getirdi. Bu durum eklentilerin doğrudan fetch yapmasını engelledi. 
+**Çözüm:** ZYouTube, arkaplan API çağrıları bu koruma yüzünden başarısız olduğunda pes etmez. İçerik betiği üzerinden DOM'a müdahale ederek YouTube'un native altyazı panelini programatik olarak açar, içeriğini kopyalar (scrape) ve tekrar kapatır. Böylece korumalı videolarda bile orijinal altyazıyı kusursuz alır.
+
+### 2. URL Parametrelerinin (Signature) Korunması
+YouTube'un altyazı URL'leri özel imzalar (`signature`, `ei`) barındırır. Bu URL'leri JavaScript'in `new URL()` objesiyle değiştirmek veya yeniden formatlamak imzaların bozulmasına neden oluyordu.
+**Çözüm:** URL'ler doğrudan `string` tabanlı konkatenasyon (birleştirme) ile işlenerek, YouTube'un oluşturduğu orijinal imzanın bozulması engellendi.
+
+### 3. YouTube UI'a Sorunsuz Buton Ekleme
+YouTube butonu son eleman (`appendChild`) olarak eklendiğinde, dar ekranlarda (veya çok butonlu videolarda) taşma (overflow) yaşanıyor ve buton görünmez oluyordu.
+**Çözüm:** Buton her zaman araç çubuğunun en başına (`insertBefore`) eklendi. Ayrıca ikon SVG'leri `24x24px` şeklinde sabitlenerek YouTube'un Material Design yönergelerine (yt-spec-button-shape-next) tam entegre edildi.
+
+---
+
+## 🛠️ Kurulum ve Geliştirme (Lokal Ortam)
+
+Projeyi bilgisayarınızda çalıştırmak ve koda katkı sağlamak için aşağıdaki adımları izleyin:
 
 ### Gereksinimler
-- Node.js (v18+)
-- npm veya yarn
+- Node.js (v18+ önerilir)
+- npm veya pnpm
 
-### Adımlar
-1. Projeyi klonlayın:
+### Kurulum Adımları
+1. Projeyi bilgisayarınıza klonlayın:
    ```bash
    git clone https://github.com/murathany90/zyoutube.git
    cd zyoutube
@@ -88,57 +113,55 @@ Projeyi yerel bilgisayarınızda çalıştırmak için aşağıdaki adımları i
    npm install
    ```
 
-3. Derleme işlemini başlatın:
+3. Geliştirme modunu başlatın (HMR destekli anında derleme):
    ```bash
-   npm run build
+   npm run dev
    ```
-   *(Sürekli geliştirme yapacaksanız `npm run dev` komutunu kullanarak Vite'ın HMR (Hot Module Replacement) özelliğinden faydalanabilirsiniz).*
+   *(Eğer canlı kullanım için tekil bir build almak isterseniz `npm run build` komutunu çalıştırabilirsiniz.)*
 
-4. Chrome'da Geliştirici Modunu Açın:
-   - Chrome'da `chrome://extensions/` adresine gidin.
-   - Sağ üstteki **"Geliştirici modu" (Developer mode)** anahtarını açın.
-   - **"Paketlenmemiş öğe yükle" (Load unpacked)** butonuna tıklayın.
-   - Proje klasöründeki `dist` dizinini seçin.
+4. Chrome'a Eklentiyi Yükleyin:
+   - Tarayıcınızda `chrome://extensions/` adresini açın.
+   - Sağ üstteki **"Geliştirici Modu" (Developer mode)** seçeneğini aktifleştirin.
+   - Sol üstten **"Paketlenmemiş öğe yükle" (Load unpacked)** butonuna tıklayın.
+   - Projenizin ana dizinindeki `dist` klasörünü seçin.
+   - Eklenti kurulduğunda YouTube'u açıp bir videoya girin, sağ altta "AI Özet" panelini göreceksiniz.
 
-## Testleri Çalıştırma
+---
 
-Projede üç seviye test bulunmaktadır:
+## 🧪 Test Süreçleri
 
-1. **Birim Testler (Unit)**: Algoritmaları (Transcript temizleme, JSON parse etme vb.) test eder.
-2. **Fixture (Bileşen) Testleri**: React bileşenlerinin sanal DOM üzerinde oluşturulmasını test eder.
-3. **Extension E2E Testi**: `dist` dizinindeki gerçek paketi Chrome'a yükleyerek uçtan uca senaryoları doğrular.
+Projenin stabilitesini korumak için Playwright ve Vitest altyapısı mevcuttur:
+
+1. **Birim Testler (Unit)**: Parser, Cleaner gibi algoritmaları izole olarak test eder.
+2. **E2E Testleri (Playwright)**: Chromium tarayıcısını ayağa kaldırarak eklentinin DOM'a doğru yerleşip yerleşmediğini, altyazıların (manuel ve otomatik) çekilip çekilemediğini uçtan uca simüle eder.
 
 Tüm testleri çalıştırmak için:
 ```bash
 npm run test
 ```
 
-Veya spesifik olarak:
-```bash
-npm run test:unit
-npm run test:fixture
-npm run test:extension
-```
-
 ---
 
 ## 📅 Gelecek Planları (Roadmap)
 
-- [ ] **Kelime Bazlı Timestamp (Vurgulama):** Özette geçen kelimelere tıklayarak videoda o saniyeye gitme özelliği.
-- [ ] **Semantic Soru-Cevap (RAG):** Videoda geçen konularla ilgili spesifik soruları doğrudan "Sor" sekmesinden yapay zekaya sorabilme.
-- [ ] **Çoklu Dil Desteği:** Yabancı dildeki videoları otomatik çevirerek Türkçe (veya istenilen dilde) özet çıkarma.
-- [ ] **Kısayol Tuşları:** Gelişmiş kullanıcılar için klavye kısayollarıyla paneli açıp kapatma.
+Eklenti gelişimine açık ve modüler bir mimariyle kodlanmıştır. Gelecek planları şunlardır:
+- [ ] **Semantic Soru-Cevap (RAG):** Videoda geçen konularla ilgili spesifik soruları doğrudan "Sor" sekmesinden yapay zekaya sorabilme (Video içi interaktif asistan).
+- [ ] **Özelleştirilebilir Promptlar:** Kullanıcıların "Sadece kodları özetle", "Tarife odaklan" gibi ön tanımlı şablonlar oluşturabilmesi.
+- [ ] **Klavye Kısayolları:** İleri düzey kullanıcılar için paneli açma, transkriptte arama yapma ve okuma hızını kısayollarla kontrol etme.
+- [ ] **Gelişmiş Dışa Aktarma:** Transkripti ve özeti Notion, Obsidian gibi uygulamalara tek tıkla aktarma (Markdown Export).
 
 ---
 
 ## 🤝 Katkıda Bulunma (Contributing)
 
-Bu proje açık kaynaklıdır ve her türlü katkıya (Pull Request) açıktır. Eğer bir hata (bug) bulduysanız veya yeni bir özellik eklemek istiyorsanız lütfen bir **Issue** açarak tartışmaya katılın.
+Bu proje tamamen açık kaynaklıdır ve her türlü katkıya (Pull Request) açıktır. Eğer bir hata (bug) bulduysanız veya yeni bir özellik eklemek istiyorsanız lütfen GitHub üzerinden bir **Issue** açarak detayları paylaşın.
 
-Özellikle YouTube'un DOM yapısı sık sık değiştiğinden, buton enjeksiyonu veya panel sabitleme gibi konularda oluşabilecek UI kırılmalarına karşı PR'lar memnuniyetle karşılanacaktır.
+Özellikle YouTube'un DOM yapısı sık sık güncellendiğinden, buton enjeksiyonu veya panel sabitleme gibi UI ile ilgili kırılmalara karşı düzeltme (fix) gönderen PR'lar büyük bir memnuniyetle incelenip birleştirilecektir. 
+
+Lütfen yeni bir özellik eklediğinizde, `tests/` klasörü altına o özelliğin çalışmasını garanti eden bir birim testi eklemeyi unutmayın.
 
 ---
 
 ## 📝 Lisans
 
-Bu proje kişisel kullanım/geliştirme amaçlıdır.
+Bu proje eğitim ve kişisel kullanım/geliştirme amaçlıdır. Açık kaynak standartlarına (MIT) uygun olarak paylaşılmıştır. Dilediğiniz gibi fork'layabilir ve kendi projelerinizde kullanabilirsiniz.

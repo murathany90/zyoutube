@@ -12,8 +12,7 @@ const CDP_PORT = 9222;
 
 const TEST_VIDEOS = [
   { url: 'https://www.youtube.com/watch?v=jNQXAC9IVRw', id: 'jNQXAC9IVRw', label: 'Me at the zoo (English)' },
-  { url: 'https://www.youtube.com/watch?v=8jPQjjsBbIc', id: '8jPQjjsBbIc', label: 'Turkish content' },
-  { url: 'https://www.youtube.com/watch?v=9bZkp7q19f0', id: '9bZkp7q19f0', label: 'Gangnam Style (auto captions)' },
+  { url: 'https://www.youtube.com/watch?v=8dT2jCIplUU', id: '8dT2jCIplUU', label: 'Failing video' },
 ];
 
 function getGitHead(): string {

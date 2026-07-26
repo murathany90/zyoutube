@@ -43,8 +43,8 @@ export class OpenAICompatibleProvider implements AIProvider {
     try {
       const payload = {
         model: config.model || 'deepseek-chat',
-        messages: [{ role: 'user', content: 'Ping! Lütfen sadece "Pong!" yaz.' }],
-        max_tokens: 10
+        messages: [{ role: 'user', content: 'Merhaba, bu bir test mesajıdır. Lütfen API bağlantısının başarılı olduğunu belirten çok kısa bir Türkçe özet yanıt ver.' }],
+        max_tokens: 50
       };
 
       const start = performance.now();
@@ -71,8 +71,8 @@ export class OpenAICompatibleProvider implements AIProvider {
         aiResponseText = data.choices?.[0]?.message?.content || '';
       } catch (e) {}
 
-      const limitRequests = res.headers.get('x-ratelimit-remaining-requests') || res.headers.get('x-ratelimit-limit-requests');
-      const limitTokens = res.headers.get('x-ratelimit-remaining-tokens') || res.headers.get('x-ratelimit-limit-tokens');
+      const limitRequests = res.headers.get('x-ratelimit-remaining-requests') || res.headers.get('x-ratelimit-limit-requests') || res.headers.get('ratelimit-remaining') || res.headers.get('x-ratelimit-remaining');
+      const limitTokens = res.headers.get('x-ratelimit-remaining-tokens') || res.headers.get('x-ratelimit-limit-tokens') || res.headers.get('ratelimit-limit') || res.headers.get('x-ratelimit-limit');
       let limitsStr = '';
       if (limitRequests || limitTokens) {
         limitsStr = `İstek: ${limitRequests || '?'} | Token: ${limitTokens || '?'}`;
@@ -124,29 +124,68 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
 
     let controller = new AbortController();
+    let onParentAbort: (() => void) | null = null;
     if (context.signal) {
-       context.signal.addEventListener('abort', () => controller.abort());
+      onParentAbort = () => controller.abort();
+      context.signal.addEventListener('abort', onParentAbort, { once: true });
     }
 
+    // Default 180s, minimum 60s — NVIDIA NIM gibi yavaş API'ler için yeterli süre
+    const timeoutMs = Math.max(config.timeoutMs || 180000, 60000);
     const timeoutId = setTimeout(() => {
        controller.abort(new Error('Timeout'));
-    }, config.timeoutMs || 30000);
+    }, timeoutMs);
 
     try {
       if (context.onProgress) context.onProgress('Özetleniyor...', 50);
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.apiKey}`,
-          ...config.customHeaders
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal
-      });
+      const doFetch = async (retryCount: number = 0): Promise<Response> => {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.apiKey}`,
+            ...config.customHeaders
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal
+        });
+
+        // 429 Rate Limit için tek seferlik retry
+        if (response.status === 429 && retryCount < 1) {
+          const retryAfterHeader = response.headers.get('retry-after');
+          const retryAfterMs = retryAfterHeader
+            ? (parseInt(retryAfterHeader, 10) || 10) * 1000
+            : 10000; // Default 10 saniye
+          const waitMs = Math.min(retryAfterMs, 30000); // Max 30s bekle
+          
+          if (context.onProgress) {
+            context.onProgress(`Rate limit aşıldı, ${Math.ceil(waitMs/1000)}s sonra yeniden deneniyor...`, 30);
+          }
+          await new Promise(r => setTimeout(r, waitMs));
+          return doFetch(retryCount + 1);
+        }
+
+        // 503 Service Unavailable için tek seferlik retry
+        if (response.status === 503 && retryCount < 1) {
+          if (context.onProgress) {
+            context.onProgress('Sunucu meşgul, 5s sonra yeniden deneniyor...', 30);
+          }
+          await new Promise(r => setTimeout(r, 5000));
+          return doFetch(retryCount + 1);
+        }
+
+        return response;
+      };
+
+      const response = await doFetch();
 
       clearTimeout(timeoutId);
+
+      // Abort listener temizliği (memory leak önleme)
+      if (onParentAbort && context.signal) {
+        context.signal.removeEventListener('abort', onParentAbort);
+      }
 
       if (!response.ok) {
         await this.handleErrorResponse(response);
@@ -174,13 +213,11 @@ export class OpenAICompatibleProvider implements AIProvider {
 
       let text = choice.message?.content;
       
+      // NVIDIA deepseek gibi modeller sadece reasoning_content döndürebilir
+      // Bu durumda reasoning'i content olarak kullan (hata fırlatmak yerine)
       if (!text && choice.message?.reasoning_content) {
-         throw new AIProviderError({
-           code: 'INVALID_RESPONSE',
-           userMessage: 'Yapay zeka sadece düşünme sürecini (reasoning) döndürdü, ana özet bulunamadı.',
-           retryable: true,
-           providerId: this.id
-         });
+        console.warn('[ZYouTube] API sadece reasoning_content döndürdü, içerik olarak kullanılıyor.');
+        text = choice.message.reasoning_content;
       }
       
       text = text || '';
@@ -207,13 +244,22 @@ export class OpenAICompatibleProvider implements AIProvider {
       return parsedResult;
     } catch (e: any) {
       clearTimeout(timeoutId);
+
+      // Abort listener temizliği
+      if (onParentAbort && context.signal) {
+        context.signal.removeEventListener('abort', onParentAbort);
+      }
+
       if (e instanceof AIProviderError) throw e;
 
       if (e.name === 'AbortError' || e.message === 'Timeout') {
+        const isTimeout = e.message === 'Timeout';
         throw new AIProviderError({
-          code: e.message === 'Timeout' ? 'REQUEST_TIMEOUT' : 'REQUEST_CANCELLED',
-          userMessage: e.message === 'Timeout' ? 'İstek zaman aşımına uğradı.' : 'İstek iptal edildi.',
-          retryable: e.message === 'Timeout',
+          code: isTimeout ? 'REQUEST_TIMEOUT' : 'REQUEST_CANCELLED',
+          userMessage: isTimeout 
+            ? `İstek ${Math.round(timeoutMs/1000)} saniye sonra zaman aşımına uğradı. Daha kısa bir transkript veya daha hızlı bir model deneyebilirsiniz.`
+            : 'İstek iptal edildi.',
+          retryable: isTimeout,
           providerId: this.id,
           debugMessage: e.toString()
         });
@@ -221,7 +267,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
       throw new AIProviderError({
         code: 'NETWORK_ERROR',
-        userMessage: 'Ağ veya bağlantı hatası oluştu.',
+        userMessage: 'Ağ veya bağlantı hatası oluştu. İnternet bağlantınızı kontrol edin.',
         retryable: true,
         providerId: this.id,
         debugMessage: e.toString()
@@ -258,9 +304,19 @@ export class OpenAICompatibleProvider implements AIProvider {
       });
     }
     if (response.status === 429) {
+      // Retry-after header bilgisi varsa kullanıcıya bildir
+      const retryAfter = response.headers.get('retry-after');
+      const remaining = response.headers.get('x-ratelimit-remaining-requests') || response.headers.get('ratelimit-remaining');
+      let userMsg = 'Kota aşıldı veya Rate Limit sınırına takıldınız.';
+      if (retryAfter) {
+        userMsg += ` ${retryAfter} saniye sonra tekrar deneyin.`;
+      }
+      if (remaining) {
+        userMsg += ` (Kalan istek: ${remaining})`;
+      }
       throw new AIProviderError({
         code: 'QUOTA_EXCEEDED',
-        userMessage: 'Kota aşıldı veya Rate Limit sınırına takıldınız.',
+        userMessage: userMsg,
         retryable: true,
         providerId: this.id,
         statusCode: 429

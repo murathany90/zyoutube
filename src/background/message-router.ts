@@ -277,18 +277,19 @@ function handleFetchCaption(message: any, sendResponse: (response: any) => void)
     });
 }
 
-function buildCaptionUrl(baseUrl: string, format: string): string {
-  const url = new URL(baseUrl);
+function buildCaptionUrl(baseUrl: string, format: string, tlang?: string): string {
+  let finalUrl = baseUrl;
   if (format) {
-    url.searchParams.set('fmt', format);
-  } else {
-    url.searchParams.delete('fmt');
+    finalUrl += `&fmt=${format}`;
   }
-  return url.toString();
+  if (tlang) {
+    finalUrl += `&tlang=${tlang}`;
+  }
+  return finalUrl;
 }
 
-async function fetchCaptionFromMainWorldInjected(captionUrl: string, format: string): Promise<{ success: boolean; data?: string; error?: string; httpStatus?: number; contentType?: string; bodyLength?: number }> {
-  const fetchUrl = buildCaptionUrl(captionUrl, format);
+async function fetchCaptionFromMainWorldInjected(captionUrl: string, format: string, tlang?: string): Promise<{ success: boolean; data?: string; error?: string; httpStatus?: number; contentType?: string; bodyLength?: number }> {
+  const fetchUrl = buildCaptionUrl(captionUrl, format, tlang);
   try {
     const response = await fetch(fetchUrl, { credentials: 'include' });
     const contentType = response.headers.get('content-type') || '';
@@ -403,10 +404,34 @@ async function scrapeTranscriptPanelInjected(): Promise<{ success: boolean; segm
       }
     }
 
-    // Step 3: Extract segments
-    if (segmentsNodes.length === 0) {
-       segmentsNodes = getSegments();
+    // Step 3: Scroll to load all lazy-loaded segments
+    _w('Step 3: Scrolling to load all segments...');
+    const scroller = document.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"] #content, ytd-transcript-search-panel-renderer #content, #segments-container, ytd-transcript-segment-list-renderer');
+    
+    if (scroller) {
+      let lastHeight = 0;
+      let noChangeCount = 0;
+      // Scroll down repeatedly until the height stops increasing (meaning all items loaded)
+      while (noChangeCount < 5) {
+        scroller.scrollTop = scroller.scrollHeight;
+        // Also dispatch a wheel event just in case it's needed
+        scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: 1000, bubbles: true }));
+        await new Promise(r => setTimeout(r, 250)); // wait for DOM to update
+        
+        if (scroller.scrollHeight === lastHeight) {
+          noChangeCount++;
+        } else {
+          lastHeight = scroller.scrollHeight;
+          noChangeCount = 0;
+        }
+      }
+      _w('Finished scrolling.');
+    } else {
+      _w('Scroller container not found, skipping auto-scroll.');
     }
+
+    // Now get all segments that have been rendered
+    segmentsNodes = getSegments();
 
     if (segmentsNodes.length === 0) {
       _w('TRANSCRIPT_PANEL_FALLBACK_FAILED');
@@ -481,7 +506,7 @@ async function scrapeTranscriptPanelInjected(): Promise<{ success: boolean; segm
 }
 
 function handleFetchCaptionFromMain(message: any, sendResponse: (response: any) => void, sender: chrome.runtime.MessageSender) {
-  const { track, format } = message;
+  const { track, format, tlang } = message;
   if (!track?.baseUrl) {
     sendResponse({ success: false, error: 'MISSING_FIELDS' });
     return;
@@ -524,7 +549,7 @@ function handleFetchCaptionFromMain(message: any, sendResponse: (response: any) 
     target: { tabId, frameIds: [0] },
     world: 'MAIN',
     func: fetchCaptionFromMainWorldInjected,
-    args: [track.baseUrl, format]
+    args: [track.baseUrl, format, tlang]
   }).then(results => {
     const result = results[0]?.result;
     if (result?.success && result.data) {

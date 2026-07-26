@@ -15,7 +15,7 @@ export interface GemPromptOptions {
 }
 
 export class GemPromptBuilder {
-  private static readonly MAX_PROMPT_LENGTH = 30000; // characters
+  private static readonly MAX_PROMPT_LENGTH = 1000000; // 1M characters
 
   static buildPrompt(segments: TranscriptSegment[], options: GemPromptOptions): string {
     const lengthMap = {

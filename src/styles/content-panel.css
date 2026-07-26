@@ -28,3 +28,123 @@ select, input {
   width: 100%;
   height: 100%;
 }
+
+/* ─── Scrollbar Styling ─── */
+.zyoutube-panel-content::-webkit-scrollbar {
+  width: 6px;
+}
+.zyoutube-panel-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.zyoutube-panel-content::-webkit-scrollbar-thumb {
+  background-color: var(--zy-border, #d1d5db);
+  border-radius: 3px;
+}
+.zyoutube-panel-content::-webkit-scrollbar-thumb:hover {
+  background-color: var(--zy-text-muted, #9ca3af);
+}
+
+/* ─── Markdown Body Rendering ─── */
+.zy-markdown-body {
+  word-break: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+
+/* Headings */
+.zy-heading {
+  margin: 0;
+  padding: 0;
+  line-height: 1.4;
+  font-weight: 700;
+  color: var(--zy-text, #111827);
+}
+.zy-h2 {
+  font-size: 1.2em;
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+.zy-h3 {
+  font-size: 1.1em;
+  margin-top: 12px;
+  margin-bottom: 6px;
+}
+.zy-h4 {
+  font-size: 1em;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+/* Paragraphs / Lines */
+.zy-line {
+  margin: 0;
+  padding: 0;
+  line-height: 1.7;
+}
+
+.zy-spacer {
+  height: 12px;
+}
+
+/* Unordered Lists */
+.zy-ul {
+  margin: 6px 0;
+  padding-left: 20px;
+  list-style-type: disc;
+}
+.zy-ul .zy-li {
+  margin: 3px 0;
+  padding: 0;
+  line-height: 1.6;
+}
+
+/* Ordered Lists */
+.zy-ol {
+  margin: 6px 0;
+  padding-left: 20px;
+  list-style-type: decimal;
+}
+.zy-ol .zy-oli {
+  margin: 3px 0;
+  padding: 0;
+  line-height: 1.6;
+}
+
+/* Code Blocks */
+.zy-code-block {
+  background-color: var(--zy-item-bg, #f3f4f6);
+  border: 1px solid var(--zy-border, #e5e7eb);
+  border-radius: 6px;
+  padding: 10px 12px;
+  margin: 8px 0;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.85em;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Inline Code */
+.zy-inline-code {
+  background-color: var(--zy-item-bg, #f3f4f6);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.88em;
+}
+
+/* Horizontal Rules */
+.zy-hr {
+  border: none;
+  border-top: 1px solid var(--zy-border, #e5e7eb);
+  margin: 12px 0;
+}
+
+/* ─── General Typography ─── */
+strong {
+  font-weight: 700;
+}
+em {
+  font-style: italic;
+}

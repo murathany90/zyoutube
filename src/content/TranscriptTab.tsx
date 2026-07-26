@@ -19,7 +19,7 @@ const HighlightedText = ({ text, highlight, exact }: { text: string, highlight: 
             : highlight.trim().split(/\s+/).some(w => w.toLowerCase() === part.toLowerCase());
             
           return isMatch ? (
-            <mark key={i} className="bg-yellow-200 text-black px-0.5 rounded">{part}</mark>
+            <mark key={i} className="bg-yellow-300 text-black px-0.5 rounded font-semibold">{part}</mark>
           ) : (
             <span key={i}>{part}</span>
           );
@@ -43,9 +43,17 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [exactMatch, setExactMatch] = useState(false);
   
+  // New States
+  const [fontSize, setFontSize] = useState(14);
+  const [autoSync, setAutoSync] = useState(false);
+  const [displayLanguage, setDisplayLanguage] = useState<'tr' | 'en' | 'both'>('tr');
+  const [currentTime, setCurrentTime] = useState<number>(0);
+  const [showTimestamps, setShowTimestamps] = useState(true);
+  
   const providerRef = useRef(new YouTubeTranscriptProvider());
   const abortControllerRef = useRef<AbortController | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const activeSegmentRef = useRef<HTMLDivElement>(null);
 
   // 1. Fetch available tracks on videoId change
   useEffect(() => {
@@ -79,11 +87,12 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
     return () => { active = false; };
   }, [videoId]);
 
-  // 2. Fetch transcript when selectedTrackUrl changes
+  // 2. Fetch transcript when selectedTrackUrl or language changes
+  const [dualLangWarning, setDualLangWarning] = useState<string | null>(null);
+
   useEffect(() => {
     if (!selectedTrackUrl) return;
     
-    // Cancel previous request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -93,11 +102,71 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
     const fetchTranscripts = async () => {
       setLoading(true);
       setError(null);
+      setDualLangWarning(null);
       try {
         const trackToLoad = tracks.find(t => t.baseUrl === selectedTrackUrl);
         if (!trackToLoad) return;
         
-        const res = await providerRef.current.fetchTranscript(videoId, trackToLoad, abortControllerRef.current || undefined);
+        let res: TranscriptResult;
+
+        if (displayLanguage === 'both') {
+          const tlangTr = trackToLoad.languageCode === 'tr' ? undefined : 'tr';
+          const tlangEn = trackToLoad.languageCode === 'en' ? undefined : 'en';
+
+          // Use independent abort controllers for each language fetch
+          const abortTr = new AbortController();
+          const abortEn = new AbortController();
+          
+          // Link parent abort to both children
+          const parentSignal = abortControllerRef.current?.signal;
+          if (parentSignal) {
+            const onParentAbort = () => { abortTr.abort(); abortEn.abort(); };
+            parentSignal.addEventListener('abort', onParentAbort, { once: true });
+          }
+
+          // Fetch primary language (Turkish)
+          const resTr = await providerRef.current.fetchTranscript(videoId, trackToLoad, abortTr, tlangTr);
+          
+          // Fetch secondary language (English) — wrapped in try/catch
+          let resEn: TranscriptResult | null = null;
+          try {
+            resEn = await providerRef.current.fetchTranscript(videoId, trackToLoad, abortEn, tlangEn);
+          } catch (enErr: any) {
+            if (enErr.name === 'AbortError') throw enErr; // Re-throw abort
+            console.warn('ZYouTube: İngilizce transkript alınamadı:', enErr.message);
+            if (active) setDualLangWarning('İngilizce çeviri alınamadı. Yalnızca Türkçe gösteriliyor.');
+          }
+          
+          // Match segments by closest startTimeMs instead of index
+          const mergedSegments = resTr.segments.map((seg) => {
+            let secondaryText: string | undefined;
+            if (resEn && resEn.segments.length > 0) {
+              // Find the closest matching English segment by startTimeMs
+              let bestMatch = resEn.segments[0];
+              let bestDiff = Math.abs(seg.startTimeMs - bestMatch.startTimeMs);
+              for (let j = 1; j < resEn.segments.length; j++) {
+                const diff = Math.abs(seg.startTimeMs - resEn.segments[j].startTimeMs);
+                if (diff < bestDiff) {
+                  bestDiff = diff;
+                  bestMatch = resEn.segments[j];
+                } else if (diff > bestDiff) {
+                  break; // Segments are chronological, no need to continue
+                }
+              }
+              // Only match if within 5 seconds tolerance
+              if (bestDiff <= 5000) {
+                secondaryText = bestMatch.cleanText;
+              }
+            }
+            return { ...seg, secondaryText };
+          });
+          
+          res = { ...resTr, segments: mergedSegments };
+        } else {
+          const tlang = trackToLoad.languageCode === displayLanguage ? undefined : displayLanguage;
+          res = await providerRef.current.fetchTranscript(videoId, trackToLoad, abortControllerRef.current || undefined, tlang);
+        }
+
         if (active) setResult(res);
       } catch (err: any) {
         if (err.name === 'AbortError') return;
@@ -112,11 +181,30 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
     return () => { 
       active = false; 
     };
-  }, [selectedTrackUrl, videoId, tracks]);
+  }, [selectedTrackUrl, videoId, tracks, displayLanguage]);
+
+  // 3. Track video time
+  useEffect(() => {
+    const video = document.querySelector('video');
+    if (!video) return;
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(video.currentTime * 1000);
+    };
+
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    return () => video.removeEventListener('timeupdate', handleTimeUpdate);
+  }, [videoId]);
+
+  // 4. Auto-sync scroll
+  useEffect(() => {
+    if (autoSync && activeSegmentRef.current && containerRef.current && !searchQuery) {
+       activeSegmentRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [currentTime, autoSync, searchQuery]);
 
   const seekTo = (ms: number) => {
     const videoElements = document.querySelectorAll('video');
-    // Find the correct video element for youtube
     for (let i = 0; i < videoElements.length; i++) {
       const vid = videoElements[i];
       if (vid.baseURI.includes(videoId)) {
@@ -134,15 +222,29 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
     const query = searchQuery.toLowerCase().trim();
     return result.segments.filter(seg => {
       if (exactMatch) {
-        return seg.cleanText.toLowerCase().includes(query);
+        return seg.cleanText.toLowerCase().includes(query) || (seg.secondaryText && seg.secondaryText.toLowerCase().includes(query));
       } else {
         const words = query.split(/\s+/);
-        return words.every(w => seg.cleanText.toLowerCase().includes(w));
+        return words.every(w => seg.cleanText.toLowerCase().includes(w) || (seg.secondaryText && seg.secondaryText.toLowerCase().includes(w)));
       }
     });
   }, [result, searchQuery, exactMatch]);
   
-  // Virtual/paginated rendering (Show first 150, load more on scroll)
+  // Find EXACT active segment to avoid double lines
+  const activeSegmentId = useMemo(() => {
+    if (searchQuery) return null; // don't highlight during search
+    let activeId = null;
+    for (let i = 0; i < filteredSegments.length; i++) {
+      if (filteredSegments[i].startTimeMs <= currentTime) {
+        activeId = filteredSegments[i].id;
+      } else {
+        break;
+      }
+    }
+    return activeId;
+  }, [filteredSegments, currentTime, searchQuery]);
+
+  // Virtual/paginated rendering
   const [visibleCount, setVisibleCount] = useState(150);
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.target as HTMLDivElement;
@@ -151,24 +253,23 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
     }
   };
 
-  // Reset pagination on search change
   useEffect(() => {
     setVisibleCount(150);
     if (containerRef.current) {
       containerRef.current.scrollTop = 0;
     }
-  }, [searchQuery, exactMatch, selectedTrackUrl]);
+  }, [searchQuery, exactMatch, selectedTrackUrl, displayLanguage]);
 
   if (loading && !result) return <div className="p-4 text-sm animate-pulse">Transkript yükleniyor...</div>;
   if (error) return <div className="p-4 text-sm text-red-500 bg-red-50 dark:bg-red-900/20 rounded">{error}</div>;
   if (!result) return null;
 
   return (
-    <div className="flex flex-col gap-2 text-sm">
-      <div className="flex flex-col gap-2 bg-gray-200 dark:bg-gray-700 p-2 rounded">
+    <div className="flex flex-col gap-2 text-sm h-full overflow-hidden">
+      <div className="flex flex-col gap-2 bg-gray-200 dark:bg-gray-700 p-2 rounded shrink-0">
         <div className="flex justify-between items-center">
           <select 
-            className="text-xs p-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
+            className="text-xs p-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-black dark:text-white"
             value={selectedTrackUrl}
             onChange={(e) => setSelectedTrackUrl(e.target.value)}
           >
@@ -178,7 +279,7 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
               </option>
             ))}
           </select>
-          <div className="text-xs">
+          <div className="text-xs text-black dark:text-white">
             <span className="font-semibold">Kalite: </span>
             <span className={result.quality?.level === 'high' ? 'text-green-600 dark:text-green-400' : result.quality?.level === 'medium' ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'}>
               {result.quality?.level === 'high' ? 'Yüksek' : result.quality?.level === 'medium' ? 'Orta' : 'Düşük'}
@@ -191,11 +292,11 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
           <input 
             type="text" 
             placeholder="Transkriptte ara..."
-            className="flex-1 px-2 py-1 border rounded text-black text-xs"
+            className="flex-1 px-2 py-1 border rounded text-black dark:text-white dark:bg-gray-800 text-xs"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
-          <label className="flex items-center gap-1 text-xs whitespace-nowrap cursor-pointer">
+          <label className="flex items-center gap-1 text-xs whitespace-nowrap cursor-pointer text-black dark:text-white">
             <input 
               type="checkbox" 
               checked={exactMatch}
@@ -204,16 +305,48 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
             Tam İfade
           </label>
         </div>
+
+        {/* New Toolbar */}
+        <div className="flex gap-2 items-center text-xs mt-1 border-t border-gray-300 dark:border-gray-600 pt-2 text-black dark:text-white">
+          <button onClick={() => setFontSize(f => Math.max(10, f - 1))} className="px-2 py-1 bg-white dark:bg-gray-800 border rounded border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">A-</button>
+          <button onClick={() => setFontSize(f => Math.min(24, f + 1))} className="px-2 py-1 bg-white dark:bg-gray-800 border rounded border-gray-300 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700">A+</button>
+          
+          <label className="flex items-center gap-1 cursor-pointer whitespace-nowrap ml-2">
+            <input type="checkbox" checked={autoSync} onChange={e => setAutoSync(e.target.checked)} />
+            Oto-Kaydırma
+          </label>
+
+          <label className="flex items-center gap-1 cursor-pointer whitespace-nowrap ml-2">
+            <input type="checkbox" checked={showTimestamps} onChange={e => setShowTimestamps(e.target.checked)} />
+            Zaman
+          </label>
+          
+          <select 
+            className="ml-auto p-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-black dark:text-white"
+            value={displayLanguage}
+            onChange={e => setDisplayLanguage(e.target.value as any)}
+          >
+            <option value="tr">Türkçe</option>
+            <option value="en">İngilizce</option>
+            <option value="both">Türkçe + İngilizce</option>
+          </select>
+        </div>
       </div>
       
       {result.quality?.level !== 'high' && (result.quality?.reasons?.length || 0) > 0 && (
-        <div className="text-yellow-600 dark:text-yellow-400 text-xs p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded">
+        <div className="text-yellow-600 dark:text-yellow-400 text-xs p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded shrink-0">
           ⚠️ {result.quality?.reasons.join(' ')}
         </div>
       )}
 
+      {dualLangWarning && (
+        <div className="text-amber-600 dark:text-amber-400 text-xs p-2 bg-amber-50 dark:bg-amber-900/20 rounded shrink-0">
+          ⚠️ {dualLangWarning}
+        </div>
+      )}
+
       {searchQuery && (
-        <div className="text-xs text-gray-500 px-1">
+        <div className="text-xs text-gray-500 px-1 shrink-0">
           {filteredSegments.length} sonuç bulundu.
         </div>
       )}
@@ -221,7 +354,7 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
       <div 
         ref={containerRef}
         onScroll={handleScroll}
-        className="flex flex-col gap-1 mt-1 max-h-96 overflow-y-auto pr-2 relative"
+        className="flex-1 flex flex-col gap-1 overflow-y-auto pr-2 relative text-black dark:text-gray-100"
       >
         {loading && <div className="absolute inset-0 bg-white/50 dark:bg-black/50 z-10 flex items-center justify-center">Yükleniyor...</div>}
         
@@ -230,17 +363,43 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
           const seconds = Math.floor((seg.startTimeMs % 60000) / 1000);
           const timeString = `${minutes}:${seconds.toString().padStart(2, '0')}`;
           
+          const isActive = activeSegmentId === seg.id;
+          
+          // Mükerrer metin temizleme
+          let displayText = seg.cleanText;
+          if (displayText.startsWith(timeString)) {
+            displayText = displayText.substring(timeString.length).trim();
+          }
+
+          let displaySecondaryText = seg.secondaryText;
+          if (displaySecondaryText && displaySecondaryText.startsWith(timeString)) {
+             displaySecondaryText = displaySecondaryText.substring(timeString.length).trim();
+          }
+          
           return (
-            <div key={seg.id} className="flex gap-2 hover:bg-gray-200 dark:hover:bg-gray-700 p-1.5 rounded group transition-colors">
-              <button 
-                onClick={() => seekTo(seg.startTimeMs)}
-                className="text-blue-600 dark:text-blue-400 min-w-[40px] text-left hover:underline font-mono text-xs mt-0.5"
-                title="Videoda bu süreye git"
-              >
-                {timeString}
-              </button>
-              <div className="flex-1">
-                <HighlightedText text={seg.cleanText} highlight={searchQuery} exact={exactMatch} />
+            <div 
+              key={seg.id} 
+              ref={isActive ? activeSegmentRef : null}
+              className={`flex gap-3 p-2 rounded group transition-colors ${isActive ? 'bg-blue-100 dark:bg-blue-900/50' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+              style={{ fontSize: `${fontSize}px`, lineHeight: 1.4 }}
+            >
+              {showTimestamps && (
+                <button 
+                  onClick={() => seekTo(seg.startTimeMs)}
+                  className={`px-2 py-1 h-fit text-center rounded bg-gray-100 dark:bg-gray-800 hover:underline font-mono mt-0.5 ${isActive ? 'text-blue-700 dark:text-blue-200 font-bold' : 'text-blue-600 dark:text-blue-400'}`}
+                  style={{ fontSize: `${Math.max(10, fontSize - 2)}px` }}
+                  title="Videoda bu süreye git"
+                >
+                  {timeString}
+                </button>
+              )}
+              <div className={`flex-1 ${isActive ? 'font-medium text-black dark:text-white' : ''}`}>
+                <HighlightedText text={displayText} highlight={searchQuery} exact={exactMatch} />
+                {displaySecondaryText && (
+                  <div className={`mt-1 ${isActive ? 'text-yellow-600 dark:text-yellow-300' : 'text-yellow-600 dark:text-yellow-400'}`}>
+                    <HighlightedText text={displaySecondaryText} highlight={searchQuery} exact={exactMatch} />
+                  </div>
+                )}
               </div>
             </div>
           );

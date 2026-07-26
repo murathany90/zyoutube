@@ -46,6 +46,13 @@ export default defineConfig({
     crx({ manifest }),
     crxPreloadFix(),
   ],
+  build: {
+    rollupOptions: {
+      input: {
+        history: 'history.html'
+      }
+    }
+  },
   test: {
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
   },

@@ -35,40 +35,103 @@ function findPromptInput(): HTMLElement | null {
 }
 
 function findSendButton(): HTMLElement | null {
-  // 1. aria-label ile gönder butonu
-  const ariaBtn = document.querySelector('[aria-label*="Send" i], [aria-label*="Gönder" i], button[aria-label*="submit" i]') as HTMLElement;
+  // 1. aria-label ile gönder butonu (genişletilmiş)
+  const ariaBtn = document.querySelector(
+    '[aria-label*="Send" i], [aria-label*="Gönder" i], ' +
+    'button[aria-label*="submit" i], button[aria-label*="Send message" i]'
+  ) as HTMLElement;
   if (ariaBtn) return ariaBtn;
 
-  // 2. Form içindeki submit
+  // 2. data-testid ile (Gemini güncel UI)
+  const testIdBtn = document.querySelector(
+    'button[data-testid="send-button"], button[data-test-id="send-button"], ' +
+    '[data-testid*="send" i]'
+  ) as HTMLElement;
+  if (testIdBtn) return testIdBtn;
+
+  // 3. Form içindeki submit
   const submitBtn = document.querySelector('button[type="submit"]') as HTMLElement;
   if (submitBtn) return submitBtn;
 
-  // 3. Mat icon ile gönder butonu (Material Design)
-  const matBtn = document.querySelector('button .send-button-container, button[data-test-id="send-button"]') as HTMLElement;
-  if (matBtn) return matBtn?.closest('button') as HTMLElement || matBtn;
+  // 4. Mat icon ile gönder butonu (Material Design)
+  const matBtn = document.querySelector('button .send-button-container') as HTMLElement;
+  if (matBtn) return matBtn.closest('button') as HTMLElement || matBtn;
+
+  // 5. SVG send icon içeren buton (Gemini'nin ikonlu butonu)
+  const svgBtns = document.querySelectorAll('button');
+  for (const btn of svgBtns) {
+    const rect = (btn as HTMLElement).getBoundingClientRect();
+    // Gönder butonu genellikle input alanının sağında, küçük boyutlu
+    if (rect.width > 20 && rect.width < 80 && rect.height > 20 && rect.height < 80) {
+      const svg = btn.querySelector('svg');
+      const hasArrowIcon = svg?.querySelector('path[d*="M2"], path[d*="m2"], path[d*="send"]');
+      if (hasArrowIcon) return btn as HTMLElement;
+    }
+  }
 
   return null;
 }
 
 function getLatestResponse(): string | null {
-  // Asistan yanıtlarını bul
-  const containers = document.querySelectorAll(
-    '[data-message-author-role="model"], .model-response-text, .response-container'
+  // Strategy 1: Data attributes and strict tags
+  const modelContainers = document.querySelectorAll(
+    '[data-message-author-role="model"], ' +
+    'message-content[data-message-author-role="model"], ' +
+    '.model-response-text, ' +
+    'model-message'
   );
-
-  if (containers.length > 0) {
-    const last = containers[containers.length - 1];
-    return last.textContent?.trim() || null;
+  if (modelContainers.length > 0) {
+    const last = modelContainers[modelContainers.length - 1] as HTMLElement;
+    const text = last.innerText?.trim() || last.textContent?.trim() || null;
+    if (text && text.length > 20) return text;
   }
 
-  // Markdown rendering alanları
-  const markdownBlocks = document.querySelectorAll('.markdown, .message-content');
-  if (markdownBlocks.length > 0) {
-    const last = markdownBlocks[markdownBlocks.length - 1];
-    return last.textContent?.trim() || null;
+  // Strategy 2: Common response classes in conversation area
+  const turnContainers = document.querySelectorAll(
+    '.conversation-container [class*="response"], ' +
+    '.chat-history [class*="model"], ' +
+    '[class*="turn-content"], ' +
+    '[class*="response-content"], ' +
+    '.markdown, ' +
+    '.message-content'
+  );
+  
+  if (turnContainers.length > 0) {
+    for (let i = turnContainers.length - 1; i >= 0; i--) {
+      const el = turnContainers[i] as HTMLElement;
+      // Yan menüdeki geçmiş öğelerini atlamak için
+      if (el.closest('nav') || el.closest('aside') || el.closest('drawers')) continue;
+      
+      const text = el.innerText?.trim() || el.textContent?.trim() || '';
+      if (text.length > 50 && !el.closest('[contenteditable="true"]')) {
+        return text;
+      }
+    }
   }
 
-  return null;
+  // Strategy 3: Herhangi bir div içindeki en son uzun blok (Sidebar ve input hariç)
+  const allDivs = document.querySelectorAll('div[class]');
+  let bestCandidate: string | null = null;
+  let bestIndex = -1;
+  for (let i = allDivs.length - 1; i >= Math.max(0, allDivs.length - 60); i--) {
+    const div = allDivs[i] as HTMLElement;
+    if (div.closest('nav') || div.closest('aside') || div.closest('[contenteditable="true"]')) continue;
+    
+    const cls = div.className || '';
+    if (typeof cls === 'string' && (cls.includes('message') || cls.includes('response') || 
+        cls.includes('content') || cls.includes('text') ||
+        cls.includes('output') || cls.includes('answer'))) {
+      const text = div.innerText?.trim() || '';
+      if (text.length > 100) {
+        if (i > bestIndex) {
+          bestCandidate = text;
+          bestIndex = i;
+        }
+      }
+    }
+  }
+  
+  return bestCandidate;
 }
 
 function isLoginPage(): boolean {
@@ -79,13 +142,23 @@ function isLoginPage(): boolean {
 }
 
 function isStreamingActive(): boolean {
-  // Streaming göstergesi kontrolü
-  const stopBtn = document.querySelector('[aria-label*="Stop" i], [aria-label*="Durdur" i]');
+  // Streaming göstergesi kontrolü (genişletilmiş)
+  const stopBtn = document.querySelector(
+    '[aria-label*="Stop" i], [aria-label*="Durdur" i], ' +
+    'button[data-testid*="stop" i]'
+  );
   if (stopBtn) return true;
 
   // Loading spinner
-  const spinner = document.querySelector('.loading-indicator, .typing-indicator, [role="progressbar"]');
+  const spinner = document.querySelector(
+    '.loading-indicator, .typing-indicator, [role="progressbar"], ' +
+    '.response-streaming, [data-is-streaming="true"]'
+  );
   if (spinner) return true;
+
+  // Gemini animasyonlu nokta göstergesi
+  const dots = document.querySelector('.thinking-indicator, .dot-animation, .loading-dots');
+  if (dots) return true;
 
   return false;
 }
@@ -94,23 +167,24 @@ function isStreamingActive(): boolean {
  * Yanıtın tamamlanmasını bekle.
  * Birden fazla sinyale dayanır: streaming durumu, DOM kararlılığı.
  */
-async function waitForResponse(timeoutMs: number = 60000): Promise<string | null> {
+async function waitForResponse(timeoutMs: number = 120000): Promise<string | null> {
   const startTime = Date.now();
+  
+  // Önce Gemini'nin yanıt vermeye veya düşünmeye başlaması için 1-2 saniye fırsat verelim
+  // Bu eski yanıtı yanlışlıkla okumamak için önemli.
+  await new Promise(r => setTimeout(r, 2000));
+
   let lastContent = '';
   let stableCount = 0;
-  const STABLE_THRESHOLD = 3; // 3 ardışık kontrol aynı sonucu verirse tamamlanmış kabul et
-  const CHECK_INTERVAL = 2000;
-
-  // Önce streaming başlamasını bekle
-  await new Promise(r => setTimeout(r, 3000));
+  const STABLE_THRESHOLD = 3; // 3 kez (3 saniye) boyunca metin hiç değişmezse bittiğini anla
+  const CHECK_INTERVAL = 1000; // Saniyede 1 kontrol et (Çok hızlı tepki süresi)
 
   while (Date.now() - startTime < timeoutMs) {
-    // Streaming aktif mi?
     const streaming = isStreamingActive();
-
     const currentContent = getLatestResponse() || '';
 
-    if (!streaming && currentContent.length > 0) {
+    // Eğer yazma işlemi bittiyse ve ekranda metin varsa
+    if (!streaming && currentContent.length > 50) {
       if (currentContent === lastContent) {
         stableCount++;
         if (stableCount >= STABLE_THRESHOLD) {
@@ -127,7 +201,6 @@ async function waitForResponse(timeoutMs: number = 60000): Promise<string | null
     await new Promise(r => setTimeout(r, CHECK_INTERVAL));
   }
 
-  // Timeout — son içeriği döndür (varsa)
   const finalContent = getLatestResponse();
   return finalContent && finalContent.length > 50 ? finalContent : null;
 }
@@ -145,7 +218,7 @@ chrome.runtime.onMessage.addListener((message: GemAutomationRequest, sender, sen
     return;
   }
 
-  if (message.prompt.length > (message.maxPromptLength || 30000)) {
+  if (message.prompt.length > (message.maxPromptLength || 1000000)) {
     sendResponse({ success: false, error: 'Prompt çok uzun.' });
     return;
   }
@@ -182,61 +255,99 @@ chrome.runtime.onMessage.addListener((message: GemAutomationRequest, sender, sen
         return;
       }
 
-      // Metni yerleştir
-      if (input.getAttribute('contenteditable') === 'true') {
-        input.focus();
-        // ProseMirror ve benzeri rich-text editörler için en güvenilir yöntem
-        const success = document.execCommand('insertText', false, message.prompt);
-        
-        if (!success) {
-          // Arka plan sekmelerinde (background tabs) focus() ve execCommand çalışmaz.
-          // Yöntem 1: ClipboardEvent (Paste simülasyonu)
-          try {
-            const dataTransfer = new DataTransfer();
-            dataTransfer.setData('text/plain', message.prompt);
-            const pasteEvent = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dataTransfer });
-            input.dispatchEvent(pasteEvent);
-          } catch(e) {}
+      // Metin yerleştirme fonksiyonu
+      const insertTextIntoInput = (el: HTMLElement, text: string): boolean => {
+        if (el.getAttribute('contenteditable') === 'true') {
+          el.focus();
+          // ProseMirror ve benzeri rich-text editörler için en güvenilir yöntem
+          const success = document.execCommand('insertText', false, text);
           
-        // Yöntem 2: beforeinput (ProseMirror modern input handler)
-          try {
-            const beforeInput = new InputEvent('beforeinput', { inputType: 'insertText', data: message.prompt, bubbles: true, cancelable: true });
-            input.dispatchEvent(beforeInput);
-          } catch(e) {}
-          
-          // Yöntem 3: TextEvent (Eski ama güçlü textInput simülasyonu)
-          try {
-            const textEvent = document.createEvent('TextEvent') as any;
-            textEvent.initTextEvent('textInput', true, true, window, message.prompt, 9, "en-US");
-            input.dispatchEvent(textEvent);
-          } catch (e) {}
+          if (!success) {
+            // Arka plan sekmelerinde (background tabs) focus() ve execCommand çalışmaz.
+            // Yöntem 1: ClipboardEvent (Paste simülasyonu)
+            try {
+              const dataTransfer = new DataTransfer();
+              dataTransfer.setData('text/plain', text);
+              const pasteEvent = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: dataTransfer });
+              el.dispatchEvent(pasteEvent);
+            } catch(e) {}
+            
+            // Yöntem 2: beforeinput (ProseMirror modern input handler)
+            try {
+              const beforeInput = new InputEvent('beforeinput', { inputType: 'insertText', data: text, bubbles: true, cancelable: true });
+              el.dispatchEvent(beforeInput);
+            } catch(e) {}
+            
+            // Yöntem 3: TextEvent (Eski ama güçlü textInput simülasyonu)
+            try {
+              const textEvent = document.createEvent('TextEvent') as any;
+              textEvent.initTextEvent('textInput', true, true, window, text, 9, "en-US");
+              el.dispatchEvent(textEvent);
+            } catch (e) {}
 
-          // Fallback
-          if (!input.textContent || input.textContent.length < 10) {
-            input.textContent = message.prompt;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
+            // Fallback: Doğrudan içeriği yerleştir
+            if (!el.textContent || el.textContent.length < 10) {
+              el.textContent = text;
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+            }
           }
+          return true;
+        } else if (el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement) {
+          el.focus();
+          el.value = text;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
         }
-      } else if (input instanceof HTMLTextAreaElement || input instanceof HTMLInputElement) {
-        input.focus();
-        input.value = message.prompt;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
+        return false;
+      };
+
+      // Metin içeriğinin başarılı yazılıp yazılmadığını kontrol et
+      const hasContent = (el: HTMLElement): boolean => {
+        const tc = el.textContent?.trim() || '';
+        const val = (el as HTMLInputElement).value?.trim?.() || '';
+        return tc.length > 10 || val.length > 10;
+      };
+
+      // İlk deneme: Metni yerleştir
+      insertTextIntoInput(input, message.prompt);
+      await new Promise(r => setTimeout(r, 800));
+
+      // Yapıştırma başarısız olduysa, background tab çalışmama sorununu aşmak için
+      // chrome API ile sekmeyi aktif yap ve yeniden dene
+      if (!hasContent(input)) {
+        console.warn('[ZYouTube] İlk yapıştırma denemesi başarısız, sekme aktif edilerek yeniden deneniyor...');
+        try {
+          // Background'a "beni aktif yap" mesajı gönder
+          chrome.runtime.sendMessage({ type: 'ACTIVATE_CURRENT_TAB' });
+          await new Promise(r => setTimeout(r, 1000));
+          
+          // Input'u yeniden bul (DOM değişmiş olabilir)
+          input = findPromptInput();
+          if (input) {
+            insertTextIntoInput(input, message.prompt);
+            await new Promise(r => setTimeout(r, 800));
+          }
+        } catch (retryErr) {
+          console.warn('[ZYouTube] Sekme aktif etme denemesi başarısız:', retryErr);
+        }
       }
 
-      // Kısa bekleme — UI'ın güncellenmesi için
-      await new Promise(r => setTimeout(r, 500));
-
-      // Yapıştırma işleminin başarılı olup olmadığını kontrol et
-      if (input.textContent?.trim().length === 0 && (input as HTMLInputElement).value?.trim().length === 0) {
-         sendResponse({ success: false, error: 'Metin yapıştırılamadı (Arka plan kısıtlaması olabilir).' });
-         return;
+      // Son kontrol
+      if (!input || !hasContent(input)) {
+        sendResponse({ success: false, error: 'Metin yapıştırılamadı. Lütfen Gemini sekmesini ön plana getirin ve tekrar deneyin.' });
+        return;
       }
 
       // Gönder butonunu bul ve tıkla
+      await new Promise(r => setTimeout(r, 300));
       const sendBtn = findSendButton();
       if (sendBtn) {
-        // ... (bazı butonlar disabled ise tıklanamayabilir)
+        // Disabled kontrolü
+        if (sendBtn.hasAttribute('disabled')) {
+          // Buton henüz aktif değilse kısa bekle
+          await new Promise(r => setTimeout(r, 1000));
+        }
         sendBtn.click();
       } else {
         // Enter tuşu ile gönder
@@ -246,7 +357,7 @@ chrome.runtime.onMessage.addListener((message: GemAutomationRequest, sender, sen
       }
 
       // Yanıt bekle
-      const response = await waitForResponse(60000);
+      const response = await waitForResponse(120000);
       if (response) {
         sendResponse({ success: true, text: response });
       } else {

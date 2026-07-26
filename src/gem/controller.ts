@@ -116,13 +116,28 @@ export class GemController {
 
       // 6. Sekme yüklenmesini bekle
       this.emitStatus(request.taskId, 'gem_page_opened', 'Gem sayfası yükleniyor...');
-      const loaded = await GemTabManager.waitForTabLoad(tabResult.tabId, 15000);
+      const loaded = await GemTabManager.waitForTabLoad(tabResult.tabId, 20000);
       if (!loaded) {
         this.emitStatus(request.taskId, 'automation_failed', 'Gem sayfası yüklenemedi.');
         return this.fallback(request.taskId, prompt, gemSettings);
       }
 
+      // Sayfa yüklendiğinde DOM'un hazır olması için ekstra bekleme
+      await new Promise(r => setTimeout(r, 2000));
+
       if (controller.signal.aborted) throw new Error('AbortError');
+
+      // Content script inject kontrolü
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tabResult.tabId },
+          files: ['src/content/gemini/gemini-content-script.ts'],
+        });
+      } catch {
+        // Zaten inject edilmişse veya hata olursa devam et
+      }
+
+
 
       // 7. Content script ile otomasyon
       this.emitStatus(request.taskId, 'sending_message', 'Prompt gönderiliyor...');
@@ -134,9 +149,10 @@ export class GemController {
           videoId: request.videoId,
           gemUrl: gemSettings.gemUrl,
           prompt: prompt,
-          maxPromptLength: 30000,
+          maxPromptLength: 1000000,
         };
 
+        this.emitStatus(request.taskId, 'waiting_response', 'Yanıt bekleniyor...');
         const response = await chrome.tabs.sendMessage(tabResult.tabId, automationRequest);
 
         if (response?.success) {

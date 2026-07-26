@@ -7,6 +7,7 @@ import { GemSettingsService } from '../gem/settings';
 import { GemSettings, DEFAULT_GEM_SETTINGS, PanelSettings, DEFAULT_PANEL_SETTINGS, SummaryEngine } from '../gem/types';
 import { ConfigValidator } from '../settings/validation';
 import { LocalAIChecker, LocalAIStatus } from '../settings/local-ai';
+import { HistoryService, SavedSummary } from '../settings/history';
 
 // ─── Toggle Component ──────────────────────────────
 
@@ -34,16 +35,18 @@ const Popup = () => {
   const [settings, setSettings] = useState<ExtensionSettings>(DEFAULT_SETTINGS);
   const [gemSettings, setGemSettings] = useState<GemSettings>(DEFAULT_GEM_SETTINGS);
   const [panelSettings, setPanelSettings] = useState<PanelSettings>(DEFAULT_PANEL_SETTINGS);
-  const [activeTab, setActiveTab] = useState<'general' | 'gemini-gem' | 'api' | 'local'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'gemini-gem' | 'api' | 'local' | 'history'>('general');
   const [localStatus, setLocalStatus] = useState<LocalAIStatus | null>(null);
   const [saveStatus, setSaveStatus] = useState<string>('');
   const [gemUrlError, setGemUrlError] = useState<string>('');
+  const [summaries, setSummaries] = useState<SavedSummary[]>([]);
 
   useEffect(() => {
     AISettingsService.getSettings().then(s => setSettings(s));
     GemSettingsService.getGemSettings().then(g => setGemSettings(g));
     GemSettingsService.getPanelSettings().then(p => setPanelSettings(p));
     LocalAIChecker.checkStatus().then(st => setLocalStatus(st));
+    HistoryService.getSummaries().then(s => setSummaries(s));
     // Migration
     GemSettingsService.migrateFromGeminiApi();
   }, []);
@@ -139,6 +142,7 @@ const Popup = () => {
     { id: 'gemini-gem', label: 'Gemini Gem' },
     { id: 'api', label: 'API' },
     { id: 'local', label: 'Yerel AI' },
+    { id: 'history', label: 'Özet Listesi' },
   ];
 
   const inputStyle: React.CSSProperties = {
@@ -406,6 +410,64 @@ const Popup = () => {
                 Bu cihazda Chrome Yerel AI kullanılamıyor. Lütfen Chrome'un deneysel AI özelliklerini etkinleştirdiğinizden emin olun.
               </div>
             )}
+          </div>
+        )}
+
+        {/* History / Özet Listesi Tab */}
+        {activeTab === 'history' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>Özet Geçmişi</h2>
+              <button 
+                onClick={() => {
+                  if(confirm('Tüm geçmişi silmek istediğinize emin misiniz?')) {
+                    HistoryService.clearHistory().then(() => setSummaries([]));
+                  }
+                }}
+                style={{ fontSize: '11px', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                Tümünü Sil
+              </button>
+            </div>
+            
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+              {summaries.length === 0 ? (
+                <div style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center', marginTop: '20px' }}>Geçmiş bulunamadı.</div>
+              ) : (
+                summaries.map(s => (
+                  <div key={s.id} style={{ padding: '10px', background: 'var(--zy-item-bg, #f3f4f6)', borderRadius: '6px', cursor: 'pointer', transition: 'background 0.2s', border: '1px solid var(--zy-border, #e5e7eb)' }}
+                    onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL(`history.html?id=${s.id}`) })}
+                    onMouseOver={(e) => e.currentTarget.style.background = 'var(--zy-item-hover, #e5e7eb)'}
+                    onMouseOut={(e) => e.currentTarget.style.background = 'var(--zy-item-bg, #f3f4f6)'}
+                  >
+                    <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                      {s.title}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--zy-text-muted, #6b7280)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <span>{new Date(s.date).toLocaleDateString('tr-TR')}</span>
+                        <span>•</span>
+                        <span>{s.summary.providerId}</span>
+                      </div>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation(); // prevent opening the page
+                          if(confirm('Bu özeti silmek istediğinize emin misiniz?')) {
+                            HistoryService.deleteSummary(s.id).then(() => {
+                              setSummaries(prev => prev.filter(item => item.id !== s.id));
+                            });
+                          }
+                        }}
+                        style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px 4px', borderRadius: '4px' }}
+                        title="Sil"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
       </div>

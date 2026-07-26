@@ -20,7 +20,7 @@ export const DEFAULT_GEM_SETTINGS: GemSettings = {
   gemUrl: '',
   tryBackgroundTab: true,
   fallbackToVisibleTab: true,
-  autoCloseTab: false,
+  autoCloseTab: true,
   newChatPerVideo: true,
   copyToClipboard: true,
   chunkLongTranscripts: true,

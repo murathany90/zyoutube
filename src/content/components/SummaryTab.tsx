@@ -4,6 +4,9 @@ import { YouTubeTranscriptProvider } from '../../transcript/youtube-provider';
 import { AISettingsService } from '../../settings/ai-settings';
 import { SummaryEngine } from '../../gem/types';
 import { sendRuntimeMessage } from '../runtime-messenger';
+import { HistoryService } from '../../settings/history';
+import { TranscriptSegment } from '../../transcript/types';
+import { formatTime, renderSimpleMarkdown } from '../../utils/formatters';
 
 export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: string; url: string }) => {
   const [status, setStatus] = useState<AITaskStatus>('queued');
@@ -12,6 +15,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [currentTranscript, setCurrentTranscript] = useState<TranscriptSegment[] | null>(null);
 
   const [selectedEngine, setSelectedEngine] = useState<SummaryEngine>('gemini-gem');
   const [selectedLength, setSelectedLength] = useState<'short' | 'standard' | 'detailed'>('standard');
@@ -36,6 +40,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
       sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId }).catch(() => {});
       setTaskId(null);
     }
+    setCurrentTranscript(null);
   }, [videoId]);
 
   // İlerleme ve sonuç dinleyicisi
@@ -50,6 +55,14 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
         setResult(message.result);
         setStatus('completed');
         setIsProcessing(false);
+        // Kaydet
+        if (currentTranscript) {
+          HistoryService.saveSummary(
+            message.result,
+            { videoId, title, url },
+            currentTranscript
+          ).catch(console.error);
+        }
       } else if (message.type === 'SUMMARY_FAILED') {
         setError(message.error.userMessage);
         setStatus('failed');
@@ -77,6 +90,7 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
       if (!track) track = tracks[0];
       
       const transcriptResult = await provider.fetchTranscript(videoId, track);
+      setCurrentTranscript(transcriptResult.segments);
 
       const request: SummaryRequest = {
         taskId: `task_${Date.now()}`,
@@ -257,11 +271,11 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
         <div style={{ backgroundColor: 'var(--zy-card-inner, rgba(0,0,0,0.03))', padding: '12px', borderRadius: '8px', border: '1px solid var(--zy-border, rgba(0,0,0,0.06))' }}>
           <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>Özet</h3>
           {(isDual || hasTr) && (
-            <div style={{ lineHeight: '1.6', color: 'var(--zy-text, #374151)', whiteSpace: 'pre-wrap' }} dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(result.summary.tr || result.summary.en || '') }} />
+            <div className="zy-markdown-body" style={{ lineHeight: '1.7', color: 'var(--zy-text, #374151)', wordBreak: 'break-word', overflowWrap: 'break-word' }} dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(result.summary.tr || result.summary.en || '') }} />
           )}
           {isDual && <hr style={{ border: 'none', borderTop: '1px solid rgba(0,0,0,0.06)', margin: '8px 0' }} />}
           {(isDual || !hasTr) && (
-             <div style={{ lineHeight: '1.6', color: 'var(--zy-text, #374151)', whiteSpace: 'pre-wrap' }} dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(result.summary.en || result.summary.tr || '') }} />
+             <div className="zy-markdown-body" style={{ lineHeight: '1.7', color: 'var(--zy-text, #374151)', wordBreak: 'break-word', overflowWrap: 'break-word' }} dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(result.summary.en || result.summary.tr || '') }} />
           )}
         </div>
 
@@ -325,34 +339,5 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
   return null;
 };
 
-function formatTime(ms: number): string {
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-}
 
-function renderSimpleMarkdown(text: string): string {
-  if (!text) return '';
-  // Escape HTML first to prevent XSS
-  let html = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-  
-  // Headers (## Header)
-  html = html.replace(/^### (.*?)$/gm, '<h4>$1</h4>');
-  html = html.replace(/^## (.*?)$/gm, '<h3>$1</h3>');
-  html = html.replace(/^# (.*?)$/gm, '<h2>$1</h2>');
-  
-  // Bold (**text**)
-  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-  
-  // Italic (*text*)
-  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
-  
-  return html;
-}
 
