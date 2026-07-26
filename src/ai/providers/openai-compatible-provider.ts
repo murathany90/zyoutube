@@ -65,6 +65,12 @@ export class OpenAICompatibleProvider implements AIProvider {
         return { success: false, message: `Bağlantı hatası: ${res.status} ${res.statusText} ${errorData?.error?.message || ''}` };
       }
 
+      let aiResponseText = '';
+      try {
+        const data = await res.json();
+        aiResponseText = data.choices?.[0]?.message?.content || '';
+      } catch (e) {}
+
       const limitRequests = res.headers.get('x-ratelimit-remaining-requests') || res.headers.get('x-ratelimit-limit-requests');
       const limitTokens = res.headers.get('x-ratelimit-remaining-tokens') || res.headers.get('x-ratelimit-limit-tokens');
       let limitsStr = '';
@@ -72,7 +78,7 @@ export class OpenAICompatibleProvider implements AIProvider {
         limitsStr = `İstek: ${limitRequests || '?'} | Token: ${limitTokens || '?'}`;
       }
 
-      return { success: true, latencyMs, limits: limitsStr };
+      return { success: true, latencyMs, limits: limitsStr, message: aiResponseText };
     } catch (e: any) {
       if (e.name === 'AbortError') return { success: false, message: 'İstek iptal edildi.' };
       return { success: false, message: e.message || 'Bilinmeyen bağlantı hatası.' };

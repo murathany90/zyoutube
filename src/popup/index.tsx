@@ -97,25 +97,32 @@ const Popup = () => {
     saveGeneralSettings({ ...settings, providers: newProviders });
   };
 
+  const [testStatus, setTestStatus] = useState<{type: 'loading'|'success'|'error', message: string, latency?: number, limits?: string, aiResponse?: string} | null>(null);
+
   const testConnection = (id: AIProviderId) => {
     const config = settings.providers[id];
     const validation = ConfigValidator.validate(config || {});
     if (!validation.isValid) {
-      alert('Geçersiz Ayarlar:\n' + validation.errors.join('\n'));
+      setTestStatus({ type: 'error', message: 'Geçersiz Ayarlar:\n' + validation.errors.join('\n') });
       return;
     }
     
+    setTestStatus({ type: 'loading', message: 'Bağlantı test ediliyor, lütfen bekleyin...' });
     // Save settings before testing
     saveGeneralSettings(settings).then(() => {
       chrome.runtime.sendMessage({ type: 'TEST_CONNECTION', providerId: id }, (response) => {
         if (chrome.runtime.lastError) {
-          alert('Bağlantı hatası: ' + chrome.runtime.lastError.message);
+          setTestStatus({ type: 'error', message: 'Bağlantı hatası: ' + chrome.runtime.lastError.message });
         } else if (response && response.success) {
-          let msg = `Bağlantı Başarılı!\nGecikme: ${response.latencyMs}ms`;
-          if (response.limits) msg += `\nLimitler: ${response.limits}`;
-          alert(msg);
+          setTestStatus({ 
+            type: 'success', 
+            message: 'Bağlantı Başarılı!',
+            latency: response.latencyMs,
+            limits: response.limits,
+            aiResponse: response.message
+          });
         } else {
-          alert(`Bağlantı Başarısız!\nHata: ${response?.message || 'Bilinmeyen hata'}`);
+          setTestStatus({ type: 'error', message: `Bağlantı Başarısız!\nHata: ${response?.message || 'Bilinmeyen hata'}` });
         }
       });
     });
@@ -338,12 +345,29 @@ const Popup = () => {
                 onChange={v => updateProvider('openai-compatible', { isSessionStorage: v })}
               />
               <button onClick={() => testConnection('openai-compatible')}
+                disabled={testStatus?.type === 'loading'}
                 style={{
                   width: '100%', padding: '8px', background: 'var(--zy-item-bg, #f3f4f6)', border: '1px solid #d1d5db',
-                  borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
-                  transition: 'background 0.15s',
+                  borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: testStatus?.type === 'loading' ? 'wait' : 'pointer',
+                  transition: 'background 0.15s', opacity: testStatus?.type === 'loading' ? 0.7 : 1
                 }}
-              >Bağlantıyı Test Et</button>
+              >
+                {testStatus?.type === 'loading' ? 'Test Ediliyor...' : 'Bağlantıyı Test Et'}
+              </button>
+
+              {testStatus && testStatus.type !== 'loading' && (
+                <div style={{
+                  marginTop: '8px', padding: '10px', borderRadius: '6px', fontSize: '12px',
+                  backgroundColor: testStatus.type === 'success' ? '#f0fdf4' : '#fef2f2',
+                  border: `1px solid ${testStatus.type === 'success' ? '#bbf7d0' : '#fecaca'}`,
+                  color: testStatus.type === 'success' ? '#166534' : '#991b1b'
+                }}>
+                  <div style={{ fontWeight: 700, marginBottom: '4px' }}>{testStatus.message}</div>
+                  {testStatus.latency !== undefined && <div><strong>Gecikme:</strong> {testStatus.latency}ms</div>}
+                  {testStatus.limits && <div><strong>Limitler:</strong> {testStatus.limits}</div>}
+                  {testStatus.aiResponse && <div style={{ marginTop: '4px', fontStyle: 'italic', opacity: 0.9 }}>AI Yanıtı: "{testStatus.aiResponse}"</div>}
+                </div>
+              )}
             </div>
           </div>
         )}
