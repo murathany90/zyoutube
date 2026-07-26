@@ -81,13 +81,14 @@ Proje, modern web teknolojilerinin gücünden faydalanarak modüler ve sürdür�
 
 Eklentinin geliştirilmesi sürecinde, YouTube'un SPA (Single Page Application) yapısından kaynaklı çeşitli zorluklar yaşanmış ve sofistike çözümler üretilmiştir:
 
-### 1. Botguard (PoToken) Korumasını Aşma
-YouTube yakın zamanda `exp=xpe` parametresi ile API isteklerine Botguard koruması getirdi. Bu durum eklentilerin doğrudan fetch yapmasını engelledi. 
-**Çözüm:** ZYouTube, arkaplan API çağrıları bu koruma yüzünden başarısız olduğunda pes etmez. İçerik betiği üzerinden DOM'a müdahale ederek YouTube'un native altyazı panelini programatik olarak açar, içeriğini kopyalar (scrape) ve tekrar kapatır. Böylece korumalı videolarda bile orijinal altyazıyı kusursuz alır.
+### 1. Botguard (PoToken) Koruması ve HTTP 429 Aşımı (Native Body Capture V2)
+YouTube yakın zamanda `exp=xpe` parametresi ile API isteklerine Botguard (PoToken) koruması getirdi. Ayrıca, eklentilerin yakaladığı URL'leri kendi başlarına ikinci kez (`fetch`) çağırması, YouTube sunucuları tarafından "kopya istek" olarak algılanıp **HTTP 429 (Too Many Requests)** hatası ile reddediliyordu.
+**Çözüm (Native Response Body Capture V2):** ZYouTube, videonun orijinal ağ isteklerini bozmamak ve 429 hatasına takılmamak için **sayfa yüklenmeden hemen önce (document_start)** çalışan bir `MAIN World` kancası (hook) kullanır. `window.fetch` ve `XMLHttpRequest` fonksiyonları araya girilerek (intercept) dinlenir. Orijinal YouTube oynatıcısı altyazı (`/api/timedtext`) isteğini yaptığında, eklenti bu ağ yanıtının gövdesini (body) klonlayıp gizlice alır (`response.clone().text()`). 
+Bu sayede eklenti kendi başına ekstra hiçbir ağ isteği yapmaz, PoToken veya Rate Limit engellerine takılmaz ve **İngilizce çeviri** dâhil tüm şifreli altyazıları ilk istekte kusursuz bir biçimde ekrana yansıtır.
 
 ### 2. URL Parametrelerinin (Signature) Korunması
 YouTube'un altyazı URL'leri özel imzalar (`signature`, `ei`) barındırır. Bu URL'leri JavaScript'in `new URL()` objesiyle değiştirmek veya yeniden formatlamak imzaların bozulmasına neden oluyordu.
-**Çözüm:** URL'ler doğrudan `string` tabanlı konkatenasyon (birleştirme) ile işlenerek, YouTube'un oluşturduğu orijinal imzanın bozulması engellendi.
+**Çözüm:** Yeni mimaride eklenti, URL manipülasyonu yapıp yeni istek göndermek yerine, doğrudan YouTube'un kendi çağırdığı URL'leri klonlayarak okur. Eklenti içi mesajlaşmada (ISOLATED ile MAIN world arası) oluşabilecek token sızıntılarını önlemek için, loglama ve hata ayıklama aşamasında hassas URL parametreleri (pot, signature) özel olarak maskelenir.
 
 ### 3. YouTube UI'a Sorunsuz Buton Ekleme
 YouTube butonu son eleman (`appendChild`) olarak eklendiğinde, dar ekranlarda (veya çok butonlu videolarda) taşma (overflow) yaşanıyor ve buton görünmez oluyordu.
