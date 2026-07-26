@@ -198,7 +198,13 @@ chrome.runtime.onMessage.addListener((message: GemAutomationRequest, sender, sen
             input.dispatchEvent(pasteEvent);
           } catch(e) {}
           
-          // Yöntem 2: TextEvent (Eski ama güçlü textInput simülasyonu)
+        // Yöntem 2: beforeinput (ProseMirror modern input handler)
+          try {
+            const beforeInput = new InputEvent('beforeinput', { inputType: 'insertText', data: message.prompt, bubbles: true, cancelable: true });
+            input.dispatchEvent(beforeInput);
+          } catch(e) {}
+          
+          // Yöntem 3: TextEvent (Eski ama güçlü textInput simülasyonu)
           try {
             const textEvent = document.createEvent('TextEvent') as any;
             textEvent.initTextEvent('textInput', true, true, window, message.prompt, 9, "en-US");
@@ -221,9 +227,16 @@ chrome.runtime.onMessage.addListener((message: GemAutomationRequest, sender, sen
       // Kısa bekleme — UI'ın güncellenmesi için
       await new Promise(r => setTimeout(r, 500));
 
+      // Yapıştırma işleminin başarılı olup olmadığını kontrol et
+      if (input.textContent?.trim().length === 0 && (input as HTMLInputElement).value?.trim().length === 0) {
+         sendResponse({ success: false, error: 'Metin yapıştırılamadı (Arka plan kısıtlaması olabilir).' });
+         return;
+      }
+
       // Gönder butonunu bul ve tıkla
       const sendBtn = findSendButton();
       if (sendBtn) {
+        // ... (bazı butonlar disabled ise tıklanamayabilir)
         sendBtn.click();
       } else {
         // Enter tuşu ile gönder
