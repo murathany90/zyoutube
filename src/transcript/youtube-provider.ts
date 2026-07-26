@@ -1,5 +1,6 @@
 import { ITranscriptProvider, CaptionTrack, TranscriptResult, TranscriptError, TranscriptSegment } from './types';
 import { parseTranscript } from './parser';
+import { cleanTranscript } from './cleaner';
 import { evaluateQuality } from './quality';
 import { getPlayerResponseFromMainWorld } from '../content/bridge';
 import { RuntimeMessengerError } from '../content/runtime-messenger';
@@ -365,7 +366,7 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
 
     // If panel scraping succeeded, return segments directly without parse
     if (usedFormat === 'transcript-panel') {
-      const rawSegments = panelSegments!;
+      const rawSegments = cleanTranscript(panelSegments!);
       const playerResponse = await this.getPlayerResponse(videoId);
       const videoDurationMs = playerResponse?.durationMs || 0;
       const quality = evaluateQuality(rawSegments, track, videoDurationMs);

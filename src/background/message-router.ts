@@ -358,14 +358,15 @@ async function scrapeTranscriptPanelInjected(): Promise<{ success: boolean; segm
       }
 
       if (transcriptBtn) {
-        _w(`Found native transcript button: ${transcriptBtn.tagName} / ${transcriptBtn.className}`);
-        transcriptBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const actualBtn = transcriptBtn.querySelector('button') || transcriptBtn;
+        _w(`Found native transcript button: ${transcriptBtn.tagName} / ${transcriptBtn.className}, clicking: ${actualBtn.tagName}`);
+        actualBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
         await new Promise(r => setTimeout(r, 200)); // give it a moment to scroll
-        transcriptBtn.click();
+        actualBtn.click();
         
         // Also dispatch a mousedown/mouseup to be safe for polymer
-        transcriptBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-        transcriptBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+        actualBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        actualBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
 
         // Wait for segments
         let waitTime = 0;
