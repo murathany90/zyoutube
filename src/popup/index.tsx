@@ -8,6 +8,8 @@ import { GemSettings, DEFAULT_GEM_SETTINGS, PanelSettings, DEFAULT_PANEL_SETTING
 import { ConfigValidator } from '../settings/validation';
 import { LocalAIChecker, LocalAIStatus } from '../settings/local-ai';
 import { HistoryService, SavedSummary } from '../settings/history';
+import { PromptBuilder } from '../ai/prompt-builder';
+import { SummaryRequest } from '../ai/types';
 
 // ─── Toggle Component ──────────────────────────────
 
@@ -124,6 +126,9 @@ const Popup = () => {
   };
 
   const [testStatus, setTestStatus] = useState<{type: 'loading'|'success'|'error', message: string, latency?: number, limits?: string, aiResponse?: string} | null>(null);
+  
+  const [showPreview, setShowPreview] = useState(false);
+  const [previewTab, setPreviewTab] = useState<'json'|'prompt'>('json');
 
   const testConnection = async (id: AIProviderId) => {
     const config = draftProvider || settings.providers[id];
@@ -402,6 +407,10 @@ const Popup = () => {
                 checked={draftProvider?.isSessionStorage || false}
                 onChange={v => updateProviderDraft({ isSessionStorage: v })}
               />
+              <Toggle label="Akıl Yürütme (Reasoning) Aktif"
+                checked={draftProvider?.enableReasoning || false}
+                onChange={v => updateProviderDraft({ enableReasoning: v })}
+              />
               
               <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                 <button onClick={() => {
@@ -426,6 +435,46 @@ const Popup = () => {
                   {testStatus?.type === 'loading' ? 'Test Ediliyor...' : 'Bağlantıyı Test Et'}
                 </button>
               </div>
+
+              <div style={{ marginTop: '8px' }}>
+                <button onClick={() => setShowPreview(!showPreview)}
+                  style={{ width: '100%', padding: '6px', background: 'transparent', border: '1px dashed #d1d5db', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', color: '#6b7280' }}
+                >
+                  {showPreview ? 'Gönderilecek İstek Önizlemesini Gizle' : 'Gönderilecek İstek Önizlemesini Göster'}
+                </button>
+              </div>
+              
+              {showPreview && (() => {
+                 const mockRequest: SummaryRequest = {
+                   taskId: 'preview_1',
+                   video: { videoId: 'abc', title: 'Test Video', url: 'https://youtube.com/watch?v=abc' },
+                   transcript: { languageCode: 'tr', sourceType: 'manual', qualityLevel: 'high', qualityReasons: [], segments: [{ id: 's1', sequence: 1, startTimeMs: 0, endTimeMs: 5000, durationMs: 5000, text: 'Test içeriği', cleanText: 'Test içeriği', languageCode: 'tr' }] },
+                   options: { length: settings.defaultLength, outputLanguage: settings.defaultLanguage, includeKeyIdeas: true, includeSections: true, includeActionItems: true },
+                   engine: 'openai-compatible'
+                 };
+                 const requestBody = PromptBuilder.buildApiRequestBody(mockRequest, draftProvider || settings.providers['openai-compatible']);
+                 // Hide API Key
+                 const displayBody = { ...requestBody };
+                 
+                 return (
+                   <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', background: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
+                        <button onClick={() => setPreviewTab('json')} style={{ flex: 1, padding: '6px', background: previewTab === 'json' ? '#fff' : 'transparent', border: 'none', borderBottom: previewTab === 'json' ? '2px solid #3b82f6' : '2px solid transparent', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>JSON Gövdesi</button>
+                        <button onClick={() => setPreviewTab('prompt')} style={{ flex: 1, padding: '6px', background: previewTab === 'prompt' ? '#fff' : 'transparent', border: 'none', borderBottom: previewTab === 'prompt' ? '2px solid #3b82f6' : '2px solid transparent', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>Prompt (Sistem & Kullanıcı)</button>
+                      </div>
+                      <div style={{ padding: '8px', fontSize: '10px', fontFamily: 'monospace', maxHeight: '150px', overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                        {previewTab === 'json' ? (
+                          JSON.stringify(displayBody, null, 2)
+                        ) : (
+                          <>
+                            <strong>[Sistem]</strong><br/>{displayBody.messages[0].content}<br/><br/>
+                            <strong>[Kullanıcı]</strong><br/>{displayBody.messages[1].content}
+                          </>
+                        )}
+                      </div>
+                   </div>
+                 );
+              })()}
 
               {testStatus && testStatus.type !== 'loading' && (
                 <div style={{

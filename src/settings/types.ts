@@ -15,6 +15,7 @@ export interface AIProviderConfig {
   customHeaders?: Record<string, string>;
   isSessionStorage?: boolean;
   responseMode?: 'markdown' | 'json';
+  enableReasoning?: boolean;
 }
 
 export interface ExtensionSettings {

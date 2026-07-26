@@ -19,6 +19,7 @@ KURALLAR:
 2. Transkriptte konuyla ilgili bilgi yoksa, bunu açıkça belirt.
 3. Zaman damgalarını (timestamps) YALNIZCA verilen segmentlerden al.
 4. Çıktı formatı olarak AŞAĞIDAKİ ŞABLONA KESİNLİKLE UY. Herhangi bir kod bloğu, JSON, HTML veya ek açıklama üretme.
+5. Zaman damgalarını yalnızca transkriptte verilen HH:MM:SS veya MM:SS biçiminde kullan. Milisaniye, ham sayı veya yeni zaman damgası üretme.
 ${langInstructions}
 ${lengthInstructions}
 5. Zaman damgalarını şu biçimde ekle: ▶ \`[ZAMAN]\` AÇIKLAMA.
@@ -62,11 +63,54 @@ ${content}
 ${instructions}`;
   }
 
+  static buildApiRequestBody(request: SummaryRequest, config: any, customContent?: string): any {
+    const model = config.model || 'gpt-3.5-turbo';
+    const systemPrompt = this.buildSystemPrompt(request, undefined);
+    const userPrompt = this.buildUserPrompt(request, undefined, customContent);
+
+    const body: any = {
+      model: model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt }
+      ],
+      temperature: config.temperature ?? 0.7,
+      max_tokens: config.maxTokens,
+    };
+    
+    if (config.enableReasoning === true) {
+      body.chat_template_kwargs = { thinking: true, reasoning_effort: "high" };
+    } else if (config.responseMode === 'json') {
+      body.response_format = { type: 'json_object' };
+    }
+
+    return body;
+  }
+
   private static formatTranscript(request: SummaryRequest): string {
-    // Basic chunking string format
     return request.transcript.segments
-      .map(s => `[${s.startTimeMs}] ${s.cleanText || s.text}`)
+      .map(s => `[${this.formatTimestampMs(s.startTimeMs)}] ${s.cleanText || s.text}`)
       .join('\n');
+  }
+
+  public static formatTimestampMs(ms: number): string {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+      return [
+        hours,
+        minutes.toString().padStart(2, "0"),
+        seconds.toString().padStart(2, "0")
+      ].join(":");
+    }
+
+    return [
+      minutes,
+      seconds.toString().padStart(2, "0")
+    ].join(":");
   }
 
   private static getLanguageInstructions(lang: 'tr' | 'en' | 'tr-en'): string {

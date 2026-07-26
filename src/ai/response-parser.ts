@@ -82,16 +82,30 @@ export class ResponseParser {
 
     // Timestamp validation function
     const sanitizeTimestamp = (ts: any): number | null => {
-      if (typeof ts !== 'number' || isNaN(ts) || !isFinite(ts) || ts < 0) return null;
-      if (videoDurationMs && ts > videoDurationMs) return null;
+      let numericTs = ts;
+      if (typeof ts === 'string') {
+        const match = ts.match(/(?:\[)?(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\])?/);
+        if (match) {
+          if (match[3]) {
+             numericTs = (parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3])) * 1000;
+          } else {
+             numericTs = (parseInt(match[1]) * 60 + parseInt(match[2])) * 1000;
+          }
+        } else {
+          numericTs = parseInt(ts, 10);
+        }
+      }
+
+      if (typeof numericTs !== 'number' || isNaN(numericTs) || !isFinite(numericTs) || numericTs < 0) return null;
+      if (videoDurationMs && numericTs > videoDurationMs) return null;
       
       // Proximity check against segments if provided
       if (segments && segments.length > 0) {
         // Just checking if it's within the overall range roughly
         const lastSeg = segments[segments.length - 1];
-        if (ts > (lastSeg.endTimeMs || lastSeg.startTimeMs) + 60000) return null; // 1 minute leeway
+        if (numericTs > (lastSeg.endTimeMs || lastSeg.startTimeMs) + 60000) return null; // 1 minute leeway
       }
-      return ts;
+      return numericTs;
     };
 
     return {

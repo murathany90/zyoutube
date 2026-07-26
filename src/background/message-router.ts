@@ -2,7 +2,7 @@ import { SummaryRequest } from '../ai/types';
 import { AITaskManager } from '../ai/task-manager';
 import { GemSettingsService } from '../gem/settings';
 import { captureNativeYouTubeCaption } from './native-caption-broker';
-import { setupOffscreenDocument } from './offscreen-manager';
+import { setupOffscreenDocument, closeOffscreenDocument } from './offscreen-manager';
 import { AISettingsService } from '../settings/ai-settings';
 
 export type ExtensionMessage =
@@ -25,7 +25,10 @@ export type ExtensionMessage =
   | { type: 'API_SUMMARY_COMPLETED'; taskId: string; videoId: string; result: any }
   | { type: 'API_SUMMARY_FAILED'; taskId: string; videoId: string; error: any }
   | { type: 'API_SUMMARY_CANCEL'; taskId: string; videoId: string }
-  | { type: 'API_SUMMARY_HEARTBEAT'; taskId: string; videoId: string };
+  | { type: 'API_SUMMARY_HEARTBEAT'; taskId: string; videoId: string }
+  | { type: 'API_SUMMARY_ACCEPTED'; taskId: string }
+  | { type: 'API_SUMMARY_IDLE' }
+  | { type: 'GET_ACTIVE_API_TASK'; videoId: string };
 
 interface CaptionTrackMessage {
   baseUrl: string;
@@ -80,19 +83,48 @@ export function setupMessageRouter() {
         };
         chrome.storage.session.set({ [`api_task_${request.taskId}`]: taskState }).catch(console.error);
 
-        AISettingsService.getProviderConfig('openai-compatible').then(config => {
-          return setupOffscreenDocument().then(() => config);
-        }).then(config => {
-          chrome.runtime.sendMessage({
-            type: 'API_SUMMARY_START',
-            taskId: request.taskId,
-            videoId: request.video.videoId,
-            request,
-            config
-          }).catch(console.error);
-        }).catch(console.error);
+        new Promise<void>((resolve, reject) => {
+          let resolved = false;
+          
+          const timeoutId = setTimeout(() => {
+            if (!resolved) {
+              resolved = true;
+              chrome.runtime.onMessage.removeListener(acceptListener);
+              reject(new Error('Offscreen worker yanıt vermedi.'));
+            }
+          }, 5000);
 
-        sendResponse({ success: true, taskId: request.taskId, accepted: true });
+          const acceptListener = (msg: any) => {
+            if (msg.type === 'API_SUMMARY_ACCEPTED' && msg.taskId === request.taskId) {
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(timeoutId);
+                chrome.runtime.onMessage.removeListener(acceptListener);
+                resolve();
+              }
+            }
+          };
+          chrome.runtime.onMessage.addListener(acceptListener);
+
+          AISettingsService.getProviderConfig('openai-compatible').then(config => {
+            return setupOffscreenDocument().then(() => config);
+          }).then(config => {
+            chrome.runtime.sendMessage({
+              type: 'API_SUMMARY_START',
+              taskId: request.taskId,
+              videoId: request.video.videoId,
+              request,
+              config
+            }).catch(e => reject(e));
+          }).catch(e => reject(e));
+
+        }).then(() => {
+          sendResponse({ success: true, taskId: request.taskId, accepted: true });
+        }).catch(err => {
+          chrome.storage.session.remove(`api_task_${request.taskId}`).catch(console.error);
+          sendResponse({ success: false, error: err.message || 'Başlatılamadı' });
+        });
+
         return true;
       }
 
@@ -149,7 +181,32 @@ export function setupMessageRouter() {
       return true;
     }
 
-    // 5. API_SUMMARY_* Relay
+    // 5. GET_ACTIVE_API_TASK
+    if (message.type === 'GET_ACTIVE_API_TASK') {
+      const { videoId } = message as any;
+      chrome.storage.session.get(null).then(allData => {
+        let activeTask = null;
+        for (const key of Object.keys(allData)) {
+          if (key.startsWith('api_task_') && allData[key].videoId === videoId) {
+            activeTask = allData[key];
+            break;
+          }
+        }
+        sendResponse({ success: true, task: activeTask });
+      }).catch(e => {
+        sendResponse({ success: false, error: e.message });
+      });
+      return true;
+    }
+
+    // 6. API_SUMMARY_IDLE
+    if (message.type === 'API_SUMMARY_IDLE') {
+      closeOffscreenDocument().catch(console.error);
+      sendResponse({ success: true });
+      return true;
+    }
+
+    // 7. API_SUMMARY_* Relay
     if (message.type.startsWith('API_SUMMARY_') && message.type !== 'API_SUMMARY_START' && message.type !== 'API_SUMMARY_CANCEL') {
       chrome.storage.session.get(`api_task_${(message as any).taskId}`).then((data) => {
         const taskState = data[`api_task_${(message as any).taskId}`];

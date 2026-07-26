@@ -4,6 +4,7 @@ export class SummaryCache {
   private static readonly DB_NAME = 'zyoutube_ai_cache';
   private static readonly STORE_NAME = 'summaries';
   private static readonly DB_VERSION = 1;
+  private static readonly PROMPT_VERSION = 'single-request-v3';
   private static dbPromise: Promise<IDBDatabase> | null = null;
 
   private static getDB(): Promise<IDBDatabase> {
@@ -45,7 +46,8 @@ export class SummaryCache {
       providerId,
       model,
       request.options.length,
-      request.options.outputLanguage
+      request.options.outputLanguage,
+      this.PROMPT_VERSION
     ].join('_');
   }
 

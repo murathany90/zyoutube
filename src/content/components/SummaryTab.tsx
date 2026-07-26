@@ -90,6 +90,19 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
       activeTaskIdRef.current = null;
     }
     setCurrentTranscript(null);
+
+    // Reconnect to active task
+    sendRuntimeMessage({ type: 'GET_ACTIVE_API_TASK', videoId }).then(res => {
+       if (res?.success && res.task) {
+          setTaskId(res.task.taskId);
+          activeTaskIdRef.current = res.task.taskId;
+          setIsProcessing(true);
+          setStatus(res.task.status || 'preparing');
+          setProgressMessage('İşleme devam ediliyor...');
+          startHeartbeatTimer();
+          startAbsoluteTimer();
+       }
+    }).catch(console.error);
   }, [videoId]);
 
   // İlerleme ve sonuç dinleyicisi
@@ -100,7 +113,7 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
         setStatus(message.status);
         if (message.message) setProgressMessage(message.message);
         startHeartbeatTimer();
-      } else if (message.type === 'API_SUMMARY_HEARTBEAT') {
+      } else if (message.type === 'API_SUMMARY_HEARTBEAT' || message.type === 'API_SUMMARY_ACCEPTED') {
         startHeartbeatTimer();
       } else if (message.type === 'SUMMARY_COMPLETED') {
         setResult(message.result);
@@ -219,43 +232,62 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
     'chrome-local': 'Yerel AI',
   };
 
+  const handleEngineChange = async (val: SummaryEngine) => {
+    setSelectedEngine(val);
+    const s = await AISettingsService.getSettings();
+    await AISettingsService.saveSettings({ ...s, defaultEngine: val });
+  };
+  const handleLengthChange = async (val: 'short'|'standard'|'detailed') => {
+    setSelectedLength(val);
+    const s = await AISettingsService.getSettings();
+    await AISettingsService.saveSettings({ ...s, defaultLength: val });
+  };
+  const handleLanguageChange = async (val: 'tr'|'en'|'tr-en') => {
+    setSelectedLanguage(val);
+    const s = await AISettingsService.getSettings();
+    await AISettingsService.saveSettings({ ...s, defaultLanguage: val });
+  };
+
+  const renderSelectors = () => (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+      <div>
+        <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Motor</label>
+        <select value={selectedEngine} onChange={e => handleEngineChange(e.target.value as SummaryEngine)}
+          style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', backgroundColor: 'var(--zy-card-bg, #fff)', color: 'var(--zy-text, #111827)' }}
+        >
+          <option value="gemini-gem">Gemini Gem</option>
+          <option value="openai-compatible">API</option>
+          <option value="chrome-local">Yerel AI</option>
+        </select>
+      </div>
+      <div>
+        <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Uzunluk</label>
+        <select value={selectedLength} onChange={e => handleLengthChange(e.target.value as any)}
+          style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', backgroundColor: 'var(--zy-card-bg, #fff)', color: 'var(--zy-text, #111827)' }}
+        >
+          <option value="short">Kısa</option>
+          <option value="standard">Standart</option>
+          <option value="detailed">Ayrıntılı</option>
+        </select>
+      </div>
+      <div>
+        <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Dil</label>
+        <select value={selectedLanguage} onChange={e => handleLanguageChange(e.target.value as any)}
+          style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', backgroundColor: 'var(--zy-card-bg, #fff)', color: 'var(--zy-text, #111827)' }}
+        >
+          <option value="tr">Türkçe</option>
+          <option value="en">English</option>
+          <option value="tr-en">Türkçe + English</option>
+        </select>
+      </div>
+    </div>
+  );
+
   // ─── İlk ekran: motor seçimi ve başlatma ───
   if (!isProcessing && !result && status !== 'cancelled' && status !== 'failed') {
     return (
       <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-          <div>
-            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Motor</label>
-            <select value={selectedEngine} onChange={e => setSelectedEngine(e.target.value as SummaryEngine)}
-              style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', backgroundColor: 'var(--zy-card-bg, #fff)', color: 'var(--zy-text, #111827)' }}
-            >
-              <option value="gemini-gem">Gemini Gem</option>
-              <option value="openai-compatible">API</option>
-              <option value="chrome-local">Yerel AI</option>
-            </select>
-          </div>
-          <div>
-            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Uzunluk</label>
-            <select value={selectedLength} onChange={e => setSelectedLength(e.target.value as any)}
-              style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', backgroundColor: 'var(--zy-card-bg, #fff)', color: 'var(--zy-text, #111827)' }}
-            >
-              <option value="short">Kısa</option>
-              <option value="standard">Standart</option>
-              <option value="detailed">Ayrıntılı</option>
-            </select>
-          </div>
-          <div>
-            <label style={{ fontSize: '11px', fontWeight: 600, display: 'block', marginBottom: '3px', color: 'var(--zy-text-muted, #6b7280)' }}>Dil</label>
-            <select value={selectedLanguage} onChange={e => setSelectedLanguage(e.target.value as any)}
-              style={{ width: '100%', fontSize: '12px', padding: '5px', border: '1px solid var(--zy-border, #d1d5db)', borderRadius: '4px', backgroundColor: 'var(--zy-card-bg, #fff)', color: 'var(--zy-text, #111827)' }}
-            >
-              <option value="tr">Türkçe</option>
-              <option value="en">English</option>
-              <option value="tr-en">Türkçe + English</option>
-            </select>
-          </div>
-        </div>
-
+        {renderSelectors()}
         <p style={{ color: 'var(--zy-text-muted, #6b7280)', fontSize: '12px' }}>Bu video için henüz bir özet oluşturulmadı.</p>
         <button onClick={startSummary}
           style={{
@@ -274,6 +306,7 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
   if (isProcessing) {
     return (
       <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '12px' }}>
+        {renderSelectors()}
         <div style={{
           width: '32px', height: '32px', border: '3px solid var(--zy-border, #fecaca)', borderTop: '3px solid #ef4444',
           borderRadius: '50%', animation: 'spin 1s linear infinite'
@@ -297,6 +330,7 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
   if (error) {
     return (
       <div style={{ padding: '12px', border: '1px solid var(--zy-error-border, #fecaca)', backgroundColor: 'var(--zy-error-bg, #fef2f2)', borderRadius: '8px', fontSize: '13px', color: 'var(--zy-error-text, #dc2626)' }}>
+        {renderSelectors()}
         <p style={{ fontWeight: 700, marginBottom: '6px' }}>Özetleme Başarısız</p>
         <p>{error}</p>
         <button onClick={startSummary}
@@ -325,8 +359,16 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
 
     return (
       <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button onClick={startSummary} style={{ fontSize: '11px', color: '#3b82f6', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+        {renderSelectors()}
+        
+        <div>
+          <button onClick={startSummary}
+            style={{
+              padding: '8px 20px', backgroundColor: '#ef4444', color: '#ffffff', border: 'none',
+              borderRadius: '20px', fontWeight: 600, fontSize: '13px', cursor: 'pointer',
+              transition: 'background 0.15s', alignSelf: 'flex-start', marginBottom: '8px'
+            }}
+          >
             Yeniden Oluştur
           </button>
         </div>

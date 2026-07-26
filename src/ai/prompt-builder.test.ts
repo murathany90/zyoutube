@@ -51,6 +51,6 @@ describe('PromptBuilder', () => {
     const req = createMockRequest('tr', 'standard');
     const prompt = PromptBuilder.buildUserPrompt(req);
     expect(prompt).toContain('Başlık: Test Video');
-    expect(prompt).toContain('[0] Hello');
+    expect(prompt).toContain('[0:00] Hello');
   });
 });
