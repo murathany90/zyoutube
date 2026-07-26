@@ -37,8 +37,8 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
 
     let urlStr = config.baseUrl;
-    if (urlStr.endsWith('/')) urlStr = urlStr.slice(0, -1);
-    const url = `${urlStr}/chat/completions`;
+    while (urlStr.endsWith('/')) urlStr = urlStr.slice(0, -1);
+    const url = urlStr.endsWith('/chat/completions') ? urlStr : `${urlStr}/chat/completions`;
 
     try {
       const payload = {
@@ -61,8 +61,19 @@ export class OpenAICompatibleProvider implements AIProvider {
       const latencyMs = Math.round(performance.now() - start);
 
       if (!res.ok) {
-        const errorData = await res.json().catch(() => null);
-        return { success: false, message: `Bağlantı hatası: ${res.status} ${res.statusText} ${errorData?.error?.message || ''}` };
+        let errorMsg = res.statusText;
+        try {
+          const rawText = await res.text();
+          try {
+            const errorData = JSON.parse(rawText);
+            errorMsg = errorData?.error?.message || errorData?.message || rawText.slice(0, 500);
+          } catch {
+            errorMsg = rawText.slice(0, 500);
+          }
+        } catch {
+          /* ignore */
+        }
+        return { success: false, message: `Bağlantı hatası: ${res.status} ${errorMsg}` };
       }
 
       let aiResponseText = '';
@@ -97,8 +108,8 @@ export class OpenAICompatibleProvider implements AIProvider {
     }
 
     let urlStr = config.baseUrl;
-    if (urlStr.endsWith('/')) urlStr = urlStr.slice(0, -1);
-    const url = `${urlStr}/chat/completions`;
+    while (urlStr.endsWith('/')) urlStr = urlStr.slice(0, -1);
+    const url = urlStr.endsWith('/chat/completions') ? urlStr : `${urlStr}/chat/completions`;
 
     const model = config.model || 'gpt-3.5-turbo';
     const systemPrompt = PromptBuilder.buildSystemPrompt(request, context.promptType);
@@ -119,7 +130,7 @@ export class OpenAICompatibleProvider implements AIProvider {
     if (isNvidiaNIM && model.includes('deepseek')) {
       // NVIDIA deepseek-v4-flash NIM settings
       body.chat_template_kwargs = { thinking: true, reasoning_effort: "high" };
-    } else {
+    } else if (config.responseMode === 'json') {
       body.response_format = { type: 'json_object' };
     }
 
@@ -276,14 +287,18 @@ export class OpenAICompatibleProvider implements AIProvider {
   }
 
   private async handleErrorResponse(response: Response) {
-    let errorData = null;
+    let message = response.statusText;
     try {
-      errorData = await response.json();
+      const rawText = await response.text();
+      try {
+        const errorData = JSON.parse(rawText);
+        message = errorData?.error?.message || errorData?.message || rawText.slice(0, 500);
+      } catch {
+        message = rawText.slice(0, 500);
+      }
     } catch {
       /* ignore */
     }
-
-    const message = errorData?.error?.message || response.statusText;
 
     if (response.status === 401) {
       throw new AIProviderError({

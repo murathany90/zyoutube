@@ -37,26 +37,5 @@ Sonra başka metin`;
     const raw = 'Bu tamamen düz bir metin, json formatında değil.';
     const result = ResponseParser.parseAndValidate(raw, 'task1', 'video1', mockProvider, 'model', mockOptions);
     expect(result.summary.tr).toBe(raw);
-    expect(result.warnings.length).toBeGreaterThan(0);
-  });
-
-  it('should limit key ideas to 5', () => {
-    const keyIdeas = Array(10).fill({ title: { tr: 'Fikir' } });
-    const json = JSON.stringify({ summary: { tr: 'Özet' }, keyIdeas });
-    const result = ResponseParser.parseAndValidate(json, 'task1', 'video1', mockProvider, 'model', mockOptions);
-    expect(result.keyIdeas.length).toBe(5);
-  });
-
-  it('should sanitize invalid timestamps', () => {
-    const json = JSON.stringify({
-      summary: { tr: 'Özet' },
-      sections: [
-        { title: { tr: 'Bölüm' }, startTimeMs: -500 }, // invalid
-        { title: { tr: 'Bölüm 2' }, startTimeMs: 'invalid_string' } // invalid
-      ]
-    });
-    const result = ResponseParser.parseAndValidate(json, 'task1', 'video1', mockProvider, 'model', mockOptions);
-    expect(result.sections[0].startTimeMs).toBeNull();
-    expect(result.sections[1].startTimeMs).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { SummaryResult, AITaskStatus, SummaryRequest } from '../../ai/types';
 import { YouTubeTranscriptProvider } from '../../transcript/youtube-provider';
 import { AISettingsService } from '../../settings/ai-settings';
@@ -16,6 +16,7 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const activeTaskIdRef = useRef<string | null>(null);
   const [currentTranscript, setCurrentTranscript] = useState<TranscriptSegment[] | null>(null);
 
   const [selectedEngine, setSelectedEngine] = useState<SummaryEngine>('gemini-gem');
@@ -40,15 +41,15 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
     if (taskId) {
       sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId }).catch(() => {});
       setTaskId(null);
+      activeTaskIdRef.current = null;
     }
     setCurrentTranscript(null);
   }, [videoId]);
 
   // İlerleme ve sonuç dinleyicisi
   useEffect(() => {
-    if (!taskId) return;
     const listener = (message: any) => {
-      if (message.taskId !== taskId) return;
+      if (!activeTaskIdRef.current || message.taskId !== activeTaskIdRef.current) return;
       if (message.type === 'SUMMARY_PROGRESS') {
         setStatus(message.status);
         if (message.message) setProgressMessage(message.message);
@@ -65,14 +66,14 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
           ).catch(console.error);
         }
       } else if (message.type === 'SUMMARY_FAILED') {
-        setError(message.error.userMessage);
+        setError(message.error?.userMessage || 'Bir hata oluştu.');
         setStatus('failed');
         setIsProcessing(false);
       }
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
-  }, [taskId]);
+  }, [videoId, title, url, currentTranscript]);
 
   const startSummary = async () => {
     try {
@@ -114,12 +115,17 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
       };
 
       setTaskId(request.taskId);
+      activeTaskIdRef.current = request.taskId;
       setProgressMessage(selectedEngine === 'gemini-gem' ? 'Gemini Gem başlatılıyor...' : 'AI Sağlayıcı aranıyor...');
 
       sendRuntimeMessage({
         type: 'START_SUMMARY',
         request,
-      }).catch(() => {});
+      }).catch((err) => {
+        setError(err.message || 'Başlatma başarısız oldu.');
+        setIsProcessing(false);
+        setStatus('failed');
+      });
     } catch (e: any) {
       let msg = e.message || 'Transkript çekilemedi.';
       if (e.diagnostics) {
@@ -137,6 +143,7 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
       setIsProcessing(false);
       setStatus('cancelled');
       setProgressMessage('İptal edildi.');
+      activeTaskIdRef.current = null;
     }
   };
 

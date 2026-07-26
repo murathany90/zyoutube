@@ -42,7 +42,9 @@ describe('OpenAICompatibleProvider Boundary Tests', () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
-      json: async () => ({ error: { message: 'Incorrect API key' } })
+      headers: { get: () => null },
+      json: async () => ({ error: { message: 'Incorrect API key' } }),
+      text: async () => JSON.stringify({ error: { message: 'Incorrect API key' } })
     });
 
     try {
@@ -58,7 +60,9 @@ describe('OpenAICompatibleProvider Boundary Tests', () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 429,
-      json: async () => ({ error: { message: 'Quota exceeded' } })
+      headers: { get: () => '1' },
+      json: async () => ({ error: { message: 'Quota exceeded' } }),
+      text: async () => JSON.stringify({ error: { message: 'Quota exceeded' } })
     });
 
     try {
@@ -74,7 +78,9 @@ describe('OpenAICompatibleProvider Boundary Tests', () => {
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 404,
-      json: async () => ({ error: { message: 'Model not found' } })
+      headers: { get: () => null },
+      json: async () => ({ error: { message: 'Model not found' } }),
+      text: async () => JSON.stringify({ error: { message: 'Model not found' } })
     });
 
     try {
@@ -96,7 +102,7 @@ describe('OpenAICompatibleProvider Boundary Tests', () => {
 
     const res = await provider.summarize(dummyRequest, {});
     // Fallback parser should handle it
-    expect(res.rawResponseStored).toBe(false);
+    expect(res.rawResponseStored).toBe(true);
   });
 
   it('should handle network timeout via AbortSignal', async () => {

@@ -40,9 +40,13 @@ const Popup = () => {
   const [saveStatus, setSaveStatus] = useState<string>('');
   const [gemUrlError, setGemUrlError] = useState<string>('');
   const [summaries, setSummaries] = useState<SavedSummary[]>([]);
+  const [draftProvider, setDraftProvider] = useState<AIProviderConfig | null>(null);
 
   useEffect(() => {
-    AISettingsService.getSettings().then(s => setSettings(s));
+    AISettingsService.getSettings().then(s => {
+      setSettings(s);
+      setDraftProvider(s.providers['openai-compatible'] || null);
+    });
     GemSettingsService.getGemSettings().then(g => setGemSettings(g));
     GemSettingsService.getPanelSettings().then(p => setPanelSettings(p));
     LocalAIChecker.checkStatus().then(st => setLocalStatus(st));
@@ -81,53 +85,72 @@ const Popup = () => {
     });
   };
 
-  const updateProvider = async (id: AIProviderId, updates: Partial<AIProviderConfig>) => {
-    if (id === 'openai-compatible' && updates.baseUrl) {
+  const updateProviderDraft = (updates: Partial<AIProviderConfig>) => {
+    setDraftProvider(prev => {
+      if (!prev) return { id: 'openai-compatible', ...updates };
+      return { ...prev, ...updates };
+    });
+  };
+
+  const requestPermissionAndSave = async (provider: AIProviderConfig): Promise<boolean> => {
+    if (provider.baseUrl) {
       try {
-        const url = new URL(updates.baseUrl);
+        const url = new URL(provider.baseUrl);
         const origin = `${url.protocol}//${url.hostname}${url.port ? ':' + url.port : ''}/*`;
-        if (chrome.permissions?.request) {
-          await new Promise(resolve => {
-            chrome.permissions.request({ origins: [origin] }, (granted) => resolve(granted));
+        if (chrome.permissions?.request && chrome.permissions?.contains) {
+          const hasPerm = await new Promise<boolean>(resolve => {
+            chrome.permissions.contains({ origins: [origin] }, resolve);
           });
+          if (!hasPerm) {
+            const granted = await new Promise<boolean>(resolve => {
+              chrome.permissions.request({ origins: [origin] }, resolve);
+            });
+            if (!granted) {
+              setTestStatus({ type: 'error', message: `İzin reddedildi: ${origin}` });
+              return false;
+            }
+          }
         }
       } catch {
-        // Invalid URL
+        setTestStatus({ type: 'error', message: 'Geçersiz Base URL' });
+        return false;
       }
     }
+    
     const newProviders = { ...settings.providers };
-    newProviders[id] = { ...newProviders[id], ...updates };
-    saveGeneralSettings({ ...settings, providers: newProviders });
+    newProviders[provider.id] = provider;
+    await saveGeneralSettings({ ...settings, providers: newProviders });
+    return true;
   };
 
   const [testStatus, setTestStatus] = useState<{type: 'loading'|'success'|'error', message: string, latency?: number, limits?: string, aiResponse?: string} | null>(null);
 
-  const testConnection = (id: AIProviderId) => {
-    const config = settings.providers[id];
+  const testConnection = async (id: AIProviderId) => {
+    const config = draftProvider || settings.providers[id];
     const validation = ConfigValidator.validate(config || {});
     if (!validation.isValid) {
       setTestStatus({ type: 'error', message: 'Geçersiz Ayarlar:\n' + validation.errors.join('\n') });
       return;
     }
     
+    const saved = await requestPermissionAndSave(config!);
+    if (!saved) return;
+    
     setTestStatus({ type: 'loading', message: 'Bağlantı test ediliyor, lütfen bekleyin...' });
-    // Save settings before testing
-    saveGeneralSettings(settings).then(() => {
-      chrome.runtime.sendMessage({ type: 'TEST_CONNECTION', providerId: id }, (response) => {
-        if (chrome.runtime.lastError) {
-          setTestStatus({ type: 'error', message: 'Bağlantı hatası: ' + chrome.runtime.lastError.message });
-        } else if (response && response.success) {
-          setTestStatus({ 
-            type: 'success', 
-            message: 'Bağlantı Başarılı!',
-            latency: response.latencyMs,
-            limits: response.limits,
-            aiResponse: response.message
-          });
-        } else {
-          setTestStatus({ type: 'error', message: `Bağlantı Başarısız!\nHata: ${response?.message || 'Bilinmeyen hata'}` });
-        }
-      });
+    chrome.runtime.sendMessage({ type: 'TEST_CONNECTION', providerId: id }, (response) => {
+      if (chrome.runtime.lastError) {
+        setTestStatus({ type: 'error', message: 'Bağlantı hatası: ' + chrome.runtime.lastError.message });
+      } else if (response && response.success) {
+        setTestStatus({ 
+          type: 'success', 
+          message: 'Bağlantı Başarılı!',
+          latency: response.latencyMs,
+          limits: response.limits,
+          aiResponse: response.message
+        });
+      } else {
+        setTestStatus({ type: 'error', message: `Bağlantı Başarısız!\nHata: ${response?.message || 'Bilinmeyen hata'}` });
+      }
     });
   };
 
@@ -320,7 +343,7 @@ const Popup = () => {
 
             <div style={{ background: 'var(--zy-card-bg, #fff)', borderRadius: '8px', border: '1px solid #e5e7eb', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-                <button onClick={() => updateProvider('openai-compatible', { baseUrl: 'https://integrate.api.nvidia.com/v1', model: 'deepseek-ai/deepseek-v4-flash', maxTokens: 16384 })}
+                <button onClick={() => updateProviderDraft({ baseUrl: 'https://integrate.api.nvidia.com/v1', model: 'deepseek-ai/deepseek-v4-flash', maxTokens: 16384 })}
                   style={{
                     flex: 1, padding: '6px', background: '#ecfccb', border: '1px solid #bef264',
                     color: '#4d7c0f', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer',
@@ -330,40 +353,66 @@ const Popup = () => {
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Base URL</label>
                 <input type="url" style={inputStyle}
-                  value={settings.providers['openai-compatible']?.baseUrl || ''}
-                  onChange={e => updateProvider('openai-compatible', { baseUrl: e.target.value })}
+                  value={draftProvider?.baseUrl || ''}
+                  onChange={e => updateProviderDraft({ baseUrl: e.target.value })}
                   placeholder="https://api.deepseek.com/v1"
                 />
               </div>
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>API Anahtarı</label>
                 <input type="password" style={inputStyle}
-                  value={settings.providers['openai-compatible']?.apiKey || ''}
-                  onChange={e => updateProvider('openai-compatible', { apiKey: e.target.value })}
+                  value={draftProvider?.apiKey || ''}
+                  onChange={e => updateProviderDraft({ apiKey: e.target.value })}
                   placeholder="sk-..."
                 />
               </div>
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Model</label>
-                <input type="text" style={inputStyle}
-                  value={settings.providers['openai-compatible']?.model || ''}
-                  onChange={e => updateProvider('openai-compatible', { model: e.target.value })}
-                />
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Model</label>
+                  <input type="text" style={inputStyle}
+                    value={draftProvider?.model || ''}
+                    onChange={e => updateProviderDraft({ model: e.target.value })}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Format</label>
+                  <select style={selectStyle}
+                    value={draftProvider?.responseMode || 'markdown'}
+                    onChange={e => updateProviderDraft({ responseMode: e.target.value as any })}
+                  >
+                    <option value="markdown">Markdown</option>
+                    <option value="json">JSON Object</option>
+                  </select>
+                </div>
               </div>
               <Toggle label="Yalnızca oturum boyunca sakla"
-                checked={settings.providers['openai-compatible']?.isSessionStorage || false}
-                onChange={v => updateProvider('openai-compatible', { isSessionStorage: v })}
+                checked={draftProvider?.isSessionStorage || false}
+                onChange={v => updateProviderDraft({ isSessionStorage: v })}
               />
-              <button onClick={() => testConnection('openai-compatible')}
-                disabled={testStatus?.type === 'loading'}
-                style={{
-                  width: '100%', padding: '8px', background: 'var(--zy-item-bg, #f3f4f6)', border: '1px solid #d1d5db',
-                  borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: testStatus?.type === 'loading' ? 'wait' : 'pointer',
-                  transition: 'background 0.15s', opacity: testStatus?.type === 'loading' ? 0.7 : 1
+              
+              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                <button onClick={() => {
+                  if (draftProvider) requestPermissionAndSave(draftProvider);
                 }}
-              >
-                {testStatus?.type === 'loading' ? 'Test Ediliyor...' : 'Bağlantıyı Test Et'}
-              </button>
+                  style={{
+                    flex: 1, padding: '8px', background: '#3b82f6', color: '#fff', border: 'none',
+                    borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+                    transition: 'background 0.15s'
+                  }}
+                >
+                  Kaydet
+                </button>
+                <button onClick={() => testConnection('openai-compatible')}
+                  disabled={testStatus?.type === 'loading'}
+                  style={{
+                    flex: 1, padding: '8px', background: 'var(--zy-item-bg, #f3f4f6)', border: '1px solid #d1d5db',
+                    borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: testStatus?.type === 'loading' ? 'wait' : 'pointer',
+                    transition: 'background 0.15s', opacity: testStatus?.type === 'loading' ? 0.7 : 1
+                  }}
+                >
+                  {testStatus?.type === 'loading' ? 'Test Ediliyor...' : 'Bağlantıyı Test Et'}
+                </button>
+              </div>
 
               {testStatus && testStatus.type !== 'loading' && (
                 <div style={{

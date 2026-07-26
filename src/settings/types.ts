@@ -13,6 +13,7 @@ export interface AIProviderConfig {
   maxTokens?: number;
   customHeaders?: Record<string, string>;
   isSessionStorage?: boolean;
+  responseMode?: 'markdown' | 'json';
 }
 
 export interface ExtensionSettings {
