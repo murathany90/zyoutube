@@ -52,7 +52,18 @@ if (!(window as any).__zyoutubeCaptionNetworkHookInstalled) {
   const originalFetch = window.fetch;
   window.fetch = async function (...args) {
     const response = await originalFetch.apply(this, args as any);
-    handleNetworkResponse(args[0], response.clone());
+    
+    if (!activeCapture) return response;
+    
+    let urlStr = '';
+    const input = args[0];
+    if (typeof input === 'string') urlStr = input;
+    else if (input instanceof URL) urlStr = input.toString();
+    else if (input instanceof Request) urlStr = input.url;
+
+    if (!urlStr.includes('/api/timedtext')) return response;
+    
+    void handleNetworkResponse(urlStr, response.clone());
     return response;
   };
 
@@ -67,7 +78,7 @@ if (!(window as any).__zyoutubeCaptionNetworkHookInstalled) {
 
   XMLHttpRequest.prototype.send = function (...args: any[]) {
     this.addEventListener('load', () => {
-      if ((this as any)._zyUrl && typeof this.responseText === 'string') {
+      if ((this as any)._zyUrl && (!this.responseType || this.responseType === 'text') && typeof this.responseText === 'string') {
         const urlStr = (this as any)._zyUrl;
         if (urlStr.includes('/api/timedtext')) {
           handleXHRResponse(urlStr, this.status, this.getResponseHeader('content-type') || '', this.responseText);
@@ -104,6 +115,11 @@ if (!(window as any).__zyoutubeCaptionNetworkHookInstalled) {
 
 function processCapturedText(urlStr: string, httpStatus: number, contentType: string, rawText: string) {
   if (!activeCapture) return;
+  
+  if (httpStatus < 200 || httpStatus >= 300) {
+    return;
+  }
+  
   if (Date.now() > activeCapture.expiresAt) {
     clearActiveCapture();
     return;
@@ -138,6 +154,9 @@ function processCapturedText(urlStr: string, httpStatus: number, contentType: st
   // Body length check (>5MB ignore, just in case)
   if (rawText.length > 5 * 1024 * 1024) return;
 
+  // Mask URL to prevent token leakage
+  const maskedUrl = `${url.hostname}${url.pathname}?lang=${sourceLanguage || ''}&tlang=${targetLanguage || ''}`;
+
   // Send result
   const resolvedLanguage = activeCapture.targetLanguage ?? activeCapture.sourceLanguage;
   
@@ -149,7 +168,7 @@ function processCapturedText(urlStr: string, httpStatus: number, contentType: st
     sourceLanguage: activeCapture.sourceLanguage,
     targetLanguage: activeCapture.targetLanguage,
     resolvedLanguage: resolvedLanguage,
-    url: urlStr,
+    url: maskedUrl,
     httpStatus,
     contentType,
     rawText

@@ -30,6 +30,15 @@
         "https://*.youtube.com/*",
         "http://localhost:3000/*"
       ],
+      "js": ["src/content/caption-network-hook.ts"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://*.youtube.com/*",
+        "http://localhost:3000/*"
+      ],
       "js": ["src/content/index.tsx"]
     },
     {
