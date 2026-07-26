@@ -256,9 +256,13 @@ export const SummaryTab = ({ videoId, title, url }: { videoId: string; title: st
         {/* Özet */}
         <div style={{ backgroundColor: 'var(--zy-card-inner, rgba(0,0,0,0.03))', padding: '12px', borderRadius: '8px', border: '1px solid var(--zy-border, rgba(0,0,0,0.06))' }}>
           <h3 style={{ fontWeight: 700, fontSize: '15px', marginBottom: '8px' }}>Özet</h3>
-          {(isDual || hasTr) && <p style={{ lineHeight: '1.6', color: 'var(--zy-text, #374151)' }}>{result.summary.tr || result.summary.en}</p>}
+          {(isDual || hasTr) && (
+            <div style={{ lineHeight: '1.6', color: 'var(--zy-text, #374151)', whiteSpace: 'pre-wrap' }} dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(result.summary.tr || result.summary.en || '') }} />
+          )}
           {isDual && <hr style={{ border: 'none', borderTop: '1px solid rgba(0,0,0,0.06)', margin: '8px 0' }} />}
-          {(isDual || !hasTr) && <p style={{ lineHeight: '1.6', color: 'var(--zy-text, #374151)' }}>{result.summary.en || result.summary.tr}</p>}
+          {(isDual || !hasTr) && (
+             <div style={{ lineHeight: '1.6', color: 'var(--zy-text, #374151)', whiteSpace: 'pre-wrap' }} dangerouslySetInnerHTML={{ __html: renderSimpleMarkdown(result.summary.en || result.summary.tr || '') }} />
+          )}
         </div>
 
         {/* Ana Fikirler */}
@@ -329,3 +333,26 @@ function formatTime(ms: number): string {
   if (hours > 0) return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
+
+function renderSimpleMarkdown(text: string): string {
+  if (!text) return '';
+  // Escape HTML first to prevent XSS
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  
+  // Headers (## Header)
+  html = html.replace(/^### (.*?)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^## (.*?)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^# (.*?)$/gm, '<h2>$1</h2>');
+  
+  // Bold (**text**)
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  
+  // Italic (*text*)
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  
+  return html;
+}
+
