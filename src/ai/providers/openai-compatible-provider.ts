@@ -36,18 +36,26 @@ export class OpenAICompatibleProvider implements AIProvider {
       return { success: false, message: 'API anahtarı veya Base URL yapılandırılmamış.' };
     }
 
-    // OpenAI models endpoint test
     let urlStr = config.baseUrl;
     if (urlStr.endsWith('/')) urlStr = urlStr.slice(0, -1);
-    const url = `${urlStr}/models`;
+    const url = `${urlStr}/chat/completions`;
 
     try {
+      const payload = {
+        model: config.model || 'deepseek-chat',
+        messages: [{ role: 'user', content: 'Ping! Lütfen sadece "Pong!" yaz.' }],
+        max_tokens: 10
+      };
+
       const start = performance.now();
       const res = await fetch(url, {
+        method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           'Authorization': `Bearer ${config.apiKey}`,
           ...config.customHeaders
         },
+        body: JSON.stringify(payload),
         signal
       });
       const latencyMs = Math.round(performance.now() - start);
@@ -57,7 +65,14 @@ export class OpenAICompatibleProvider implements AIProvider {
         return { success: false, message: `Bağlantı hatası: ${res.status} ${res.statusText} ${errorData?.error?.message || ''}` };
       }
 
-      return { success: true, latencyMs };
+      const limitRequests = res.headers.get('x-ratelimit-remaining-requests') || res.headers.get('x-ratelimit-limit-requests');
+      const limitTokens = res.headers.get('x-ratelimit-remaining-tokens') || res.headers.get('x-ratelimit-limit-tokens');
+      let limitsStr = '';
+      if (limitRequests || limitTokens) {
+        limitsStr = `İstek: ${limitRequests || '?'} | Token: ${limitTokens || '?'}`;
+      }
+
+      return { success: true, latencyMs, limits: limitsStr };
     } catch (e: any) {
       if (e.name === 'AbortError') return { success: false, message: 'İstek iptal edildi.' };
       return { success: false, message: e.message || 'Bilinmeyen bağlantı hatası.' };

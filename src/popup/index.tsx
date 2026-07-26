@@ -111,7 +111,9 @@ const Popup = () => {
         if (chrome.runtime.lastError) {
           alert('Bağlantı hatası: ' + chrome.runtime.lastError.message);
         } else if (response && response.success) {
-          alert(`Bağlantı Başarılı!\nGecikme: ${response.latencyMs}ms`);
+          let msg = `Bağlantı Başarılı!\nGecikme: ${response.latencyMs}ms`;
+          if (response.limits) msg += `\nLimitler: ${response.limits}`;
+          alert(msg);
         } else {
           alert(`Bağlantı Başarısız!\nHata: ${response?.message || 'Bilinmeyen hata'}`);
         }

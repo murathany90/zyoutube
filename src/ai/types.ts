@@ -92,6 +92,7 @@ export interface ConnectionTestResult {
   success: boolean;
   message?: string;
   latencyMs?: number;
+  limits?: string;
 }
 
 export type PromptType = 'single' | 'chunk' | 'merge';
