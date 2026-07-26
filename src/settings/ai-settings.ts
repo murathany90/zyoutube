@@ -41,6 +41,11 @@ export class AISettingsService {
       if (savedSettings.providers) {
         for (const [key, value] of Object.entries(savedSettings.providers)) {
           if (key === 'gemini-api') continue; // Eski Gemini API provider'ı atla
+          
+          if (key === 'openai-compatible' && value.timeoutMs === 30000) {
+            value.timeoutMs = 180000;
+          }
+
           merged.providers[key] = {
             ...DEFAULT_SETTINGS.providers[key],
             ...value

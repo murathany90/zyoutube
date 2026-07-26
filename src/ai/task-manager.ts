@@ -65,62 +65,70 @@ export class AITaskManager {
       const providerConfig = settings.providers[providerId];
       const modelName = providerConfig?.model || 'default';
 
+      let effectiveRequest = request;
+      let isTruncated = false;
+      let lastSegmentTimeMs = 0;
+      let contextWindow = 130000;
+
+      if (engine === 'openai-compatible') {
+        // ─── Single-Request Token Bounded Logic ───
+        this.updateStatus(task.taskId, 'preparing', onProgress, 'Transkript bağlam sınırına göre hazırlanıyor...');
+        
+        contextWindow = providerConfig?.contextWindowTokens ?? 130000;
+        const outputReserve = providerConfig?.maxTokens ?? 4000;
+        const promptReserve = 2000;
+        const maxTranscriptTokens = Math.max(1000, contextWindow - outputReserve - promptReserve);
+
+        // Token estimation: ceil(length / 3.5)
+        const estimateTokens = (text: string) => Math.ceil(text.length / 3.5);
+
+        let totalTokens = 0;
+        const limitedSegments: typeof request.transcript.segments = [];
+
+        for (const seg of request.transcript.segments) {
+          const text = seg.cleanText || seg.text;
+          
+          // Format as [MM:SS] or [HH:MM:SS]
+          const totalSeconds = Math.floor(seg.startTimeMs / 1000);
+          const hours = Math.floor(totalSeconds / 3600);
+          const minutes = Math.floor((totalSeconds % 3600) / 60);
+          const seconds = totalSeconds % 60;
+          const timeStr = hours > 0
+            ? `[${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}]`
+            : `[${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}]`;
+          
+          const formattedText = `${timeStr} ${text}`;
+          const tokens = estimateTokens(formattedText);
+
+          if (totalTokens + tokens > maxTranscriptTokens) {
+            isTruncated = true;
+            break;
+          }
+
+          totalTokens += tokens;
+          limitedSegments.push(seg);
+          lastSegmentTimeMs = seg.startTimeMs;
+        }
+
+        effectiveRequest = {
+          ...request,
+          transcript: {
+            ...request.transcript,
+            segments: limitedSegments
+          }
+        };
+      } else if (engine === 'chrome-local') {
+        // ─── Placeholder for chrome-local existing behavior ───
+        // Not currently implemented, relies on missing provider error
+      }
+
       // Cache Kontrolü
-      const cacheResult = await SummaryCache.get(request, providerId, modelName);
+      const cacheResult = await SummaryCache.get(effectiveRequest, providerId, modelName);
       if (cacheResult) {
         this.updateStatus(task.taskId, 'completed', onProgress);
         this.cleanup(task.taskId);
         return cacheResult;
       }
-
-      // ─── Single-Request Token Bounded Logic ───
-      this.updateStatus(task.taskId, 'preparing', onProgress, 'Transkript bağlam sınırına göre hazırlanıyor...');
-      
-      const contextWindow = providerConfig?.contextWindowTokens ?? 130000;
-      const outputReserve = providerConfig?.maxTokens ?? 4000;
-      const promptReserve = 2000;
-      const maxTranscriptTokens = Math.max(1000, contextWindow - outputReserve - promptReserve);
-
-      // Token estimation: ceil(length / 3.5)
-      const estimateTokens = (text: string) => Math.ceil(text.length / 3.5);
-
-      let totalTokens = 0;
-      const limitedSegments: typeof request.transcript.segments = [];
-      let isTruncated = false;
-      let lastSegmentTimeMs = 0;
-
-      for (const seg of request.transcript.segments) {
-        const text = seg.cleanText || seg.text;
-        
-        // Format as [MM:SS] or [HH:MM:SS]
-        const totalSeconds = Math.floor(seg.startTimeMs / 1000);
-        const hours = Math.floor(totalSeconds / 3600);
-        const minutes = Math.floor((totalSeconds % 3600) / 60);
-        const seconds = totalSeconds % 60;
-        const timeStr = hours > 0
-          ? `[${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}]`
-          : `[${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}]`;
-        
-        const formattedText = `${timeStr} ${text}`;
-        const tokens = estimateTokens(formattedText);
-
-        if (totalTokens + tokens > maxTranscriptTokens) {
-          isTruncated = true;
-          break;
-        }
-
-        totalTokens += tokens;
-        limitedSegments.push(seg);
-        lastSegmentTimeMs = seg.startTimeMs;
-      }
-
-      const effectiveRequest = {
-        ...request,
-        transcript: {
-          ...request.transcript,
-          segments: limitedSegments
-        }
-      };
 
       this.updateStatus(task.taskId, 'summarizing', onProgress, 'Tek istekte özetleniyor...');
       if (onProgress) onProgress('summarizing', 'Tek istekte özetleniyor...', 50);
@@ -130,6 +138,7 @@ export class AITaskManager {
       });
 
       if (isTruncated) {
+        const formattedContext = contextWindow.toLocaleString("tr-TR");
         const totalSeconds = Math.floor(lastSegmentTimeMs / 1000);
         const hours = Math.floor(totalSeconds / 3600);
         const minutes = Math.floor((totalSeconds % 3600) / 60);
@@ -138,8 +147,8 @@ export class AITaskManager {
           ? `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
           : `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 
-        const trWarning = `Transkript 130.000 token bağlam sınırı nedeniyle kısaltıldı. Videonun ilk ${timeStr} bölümü özetlendi.`;
-        const enWarning = `Transcript was truncated due to the 130,000 token context limit. The first ${timeStr} of the video was summarized.`;
+        const trWarning = `Transkript ${formattedContext} token bağlam sınırı nedeniyle kısaltıldı. Videonun ilk ${timeStr} bölümü özetlendi.`;
+        const enWarning = `Transcript was truncated due to the ${formattedContext} token context limit. The first ${timeStr} of the video was summarized.`;
         
         finalResult.warnings = finalResult.warnings || [];
         finalResult.warnings.push({ tr: trWarning, en: enWarning });

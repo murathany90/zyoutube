@@ -37,7 +37,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
       id: 'openai-compatible',
       model: 'deepseek-chat',
       baseUrl: 'https://api.deepseek.com/v1',
-      timeoutMs: 30000,
+      timeoutMs: 180000,
       temperature: 0.7,
       contextWindowTokens: 130000,
       isSessionStorage: false
