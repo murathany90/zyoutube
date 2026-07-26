@@ -18,7 +18,13 @@ export type TranscriptErrorCode =
   | 'CAPTION_URL_REJECTED'
   | 'CAPTION_RESPONSE_HTML'
   | 'CAPTION_FETCH_TIMEOUT'
-  | 'EXTENSION_CONTEXT_INVALIDATED';
+  | 'EXTENSION_CONTEXT_INVALIDATED'
+  | 'BACKGROUND_EMPTY_BODY'
+  | 'PAGE_CONTEXT_EMPTY_BODY'
+  | 'CAPTION_URL_EXPIRED'
+  | 'CAPTION_FORMAT_CONFLICT'
+  | 'CAPTION_HTTP_ERROR'
+  | 'TRANSCRIPT_PANEL_FALLBACK_FAILED';
 
 export class TranscriptError extends Error {
   constructor(public code: TranscriptErrorCode, message: string, public diagnostics?: TranscriptDiagnostics) {
