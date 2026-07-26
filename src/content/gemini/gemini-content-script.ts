@@ -159,8 +159,24 @@ chrome.runtime.onMessage.addListener((message: GemAutomationRequest, sender, sen
   // Asenkron otomasyon
   (async () => {
     try {
-      // Prompt alanını bul
-      const input = findPromptInput();
+      // Prompt alanını 10 saniye boyunca bekle, gerekirse Gem onay butonuna tıkla
+      let input: HTMLElement | null = null;
+      for (let i = 0; i < 20; i++) {
+        // Chat with this Gem / Bu Gem ile sohbet et butonunu bul
+        const gemChatBtn = Array.from(document.querySelectorAll('button, a')).find(el => {
+          const text = (el.textContent || '').trim().toLowerCase();
+          return text.includes('chat with this gem') || text.includes('bu gem ile sohbet et') || text.includes('sohbeti başlat');
+        });
+        if (gemChatBtn) {
+           (gemChatBtn as HTMLElement).click();
+           await new Promise(r => setTimeout(r, 1000));
+        }
+
+        input = findPromptInput();
+        if (input) break;
+        await new Promise(r => setTimeout(r, 500));
+      }
+
       if (!input) {
         sendResponse({ success: false, error: 'Prompt giriş alanı bulunamadı.' });
         return;
