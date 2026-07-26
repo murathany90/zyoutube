@@ -31,8 +31,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
     }
     handleApiSummaryStart(message.taskId, message.videoId, message.request, message.config);
-    // 4. Offscreen kabul onayı
-    chrome.runtime.sendMessage({ type: 'API_SUMMARY_ACCEPTED', taskId: message.taskId }).catch(console.error);
     sendResponse({ success: true, accepted: true });
     return true;
   }
@@ -71,6 +69,9 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
     timeoutId,
     startedAt
   });
+  
+  // 4. Offscreen kabul onayı
+  chrome.runtime.sendMessage({ type: 'API_SUMMARY_ACCEPTED', taskId }).catch(console.error);
 
   resetIdleTimer(); // clear idle timer since we have an active task
 
@@ -167,7 +168,11 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
     };
     
     if (usage) {
-       finalResult.usage = usage;
+       finalResult.usage = {
+         inputTokens: usage.prompt_tokens || 0,
+         outputTokens: usage.completion_tokens || 0,
+         totalTokens: usage.total_tokens || 0
+       };
     }
     
     if (request.transcript.warnings) {
@@ -190,10 +195,11 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
     
   } catch (e: any) {
     console.log(`[API Task] failed:`, e);
-    const isAbort = e.name === 'AbortError' || e.message === 'AbortError' || e.message === 'Timeout';
+    const isTimeout = e.message === 'Timeout';
+    const isAbort = e.name === 'AbortError' || e.message === 'AbortError';
     
-    const errorCode = isAbort ? 'REQUEST_CANCELLED' : 'UNKNOWN_ERROR';
-    const userMsg = isAbort ? 'İstek iptal edildi.' : (e.message || 'Beklenmeyen bir hata oluştu.');
+    const errorCode = isAbort ? 'REQUEST_CANCELLED' : (isTimeout ? 'TIMEOUT' : 'UNKNOWN_ERROR');
+    const userMsg = isAbort ? 'İstek kullanıcı tarafından iptal edildi.' : (isTimeout ? 'İstek zaman aşımına uğradı. İşlem çok uzun sürdü.' : (e.message || 'Beklenmeyen bir hata oluştu.'));
     
     chrome.runtime.sendMessage({
         type: 'API_SUMMARY_FAILED',
