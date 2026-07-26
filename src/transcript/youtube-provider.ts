@@ -242,7 +242,10 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
   }
 
   private async tryFetchCaption(url: string, signal?: AbortSignal): Promise<string | null> {
-    const response = await fetch(url, { signal });
+    const response = await fetch(url, { signal, credentials: 'include' });
+    if (response.status === 429) {
+      throw new Error('HTTP_429_TOO_MANY_REQUESTS');
+    }
     if (!response.ok) return null;
     const text = await response.text();
     if (!text || !text.trim()) return null;
@@ -269,10 +272,10 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
     }
   }
 
-  private async scrapeTranscriptPanel(videoId: string): Promise<TranscriptSegment[] | null> {
+  private async scrapeTranscriptPanel(videoId: string, tlang?: string): Promise<TranscriptSegment[] | null> {
     try {
-      const response = await sendRuntimeMessage<{ type: 'FETCH_TRANSCRIPT_PANEL'; requestId: string; videoId: string }, { success: boolean; segments?: any[]; error?: string }>(
-        { type: 'FETCH_TRANSCRIPT_PANEL', requestId: Math.random().toString(), videoId },
+      const response = await sendRuntimeMessage<{ type: 'FETCH_TRANSCRIPT_PANEL'; requestId: string; videoId: string; tlang?: string }, { success: boolean; segments?: any[]; error?: string }>(
+        { type: 'FETCH_TRANSCRIPT_PANEL', requestId: Math.random().toString(), videoId, tlang },
         { timeoutMs: 25000 }
       );
       if (response?.success && response.segments && response.segments.length > 0) {
@@ -298,10 +301,12 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
     let usedFormat: string | undefined;
     let lastError: string | undefined;
     let panelSegments: TranscriptSegment[] | null = null;
+    let skipApi = false;
 
     // Phase 1: Try direct content-script fetch (API fetch)
     console.warn('ZYouTube [Transcript] Trying direct content-script fetch (API)...');
     for (const fmt of this.FORMATS) {
+      if (skipApi) break;
       try {
         const fetchUrl = this.buildCaptionUrl(track.baseUrl, fmt, tlang);
         this.validateCaptionUrl(fetchUrl);
@@ -318,13 +323,19 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
             expectedVideoId: videoId, extractionSource: 'none', playerResponseFound: true, captionsObjectFound: true, trackCount: 1, trackLanguages: [track.languageCode], retryCount: 0, errorCode: 'FETCH_ABORTED'
           });
         }
+        if (e.message === 'HTTP_429_TOO_MANY_REQUESTS') {
+          console.warn('ZYouTube [Transcript] API rate limited (429), skipping all further API fetch attempts.');
+          skipApi = true;
+          lastError = 'HTTP_429_TOO_MANY_REQUESTS';
+          break;
+        }
         if (e instanceof TranscriptError) throw e;
         lastError = e.message;
       }
     }
 
     // Phase 2: Try via background MAIN world (API fetch)
-    if (rawText === null && !usedFormat) {
+    if (rawText === null && !usedFormat && !skipApi) {
       console.warn('ZYouTube [Transcript] Direct fetch failed, trying MAIN world via background...');
       for (const fmt of this.FORMATS) {
         try {
@@ -342,38 +353,21 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
     }
 
     // Phase 3: Fallback to scraping native YouTube transcript panel
-    // IMPORTANT: Skip panel scraping when tlang is specified because
-    // scrapeTranscriptPanel ignores the tlang parameter and always returns
-    // the page's current language. Only API-based methods support &tlang=.
+    // If tlang is specified, the injected DOM scraper will attempt to 
+    // force the YouTube player to switch to auto-translate before reading.
     if (rawText === null && !usedFormat) {
-      if (!tlang) {
-        console.warn('ZYouTube [Transcript] API fetches failed, falling back to native transcript panel scraping...');
-        panelSegments = await this.scrapeTranscriptPanel(videoId);
+      console.warn(`ZYouTube [Transcript] API fetches failed (tlang=${tlang || 'none'}), falling back to native transcript panel scraping...`);
+      try {
+        panelSegments = await this.scrapeTranscriptPanel(videoId, tlang);
         if (panelSegments && panelSegments.length > 0) {
           usedFormat = 'transcript-panel';
+          lastError = '';
         } else {
           lastError = 'TRANSCRIPT_PANEL_FAILED';
         }
-      } else {
-        console.warn('ZYouTube [Transcript] Translation requested (tlang=' + tlang + '), skipping panel scraping fallback...');
-        lastError = 'PANEL_SKIPPED_FOR_TRANSLATION';
-      }
-    }
-
-
-    if (rawText === null && !usedFormat && tlang) {
-      console.warn('ZYouTube [Transcript] API fetches failed for translation. Falling back to native panel scrape...');
-      try {
-        panelSegments = await this.scrapeTranscriptPanel(videoId);
-        if (panelSegments && panelSegments.length > 0) {
-          if (panelSegments[0]) {
-            panelSegments[0].text = "[Çeviri Youtube tarafından engellendi, orijinal dil gösteriliyor] " + panelSegments[0].text;
-          }
-          usedFormat = 'transcript-panel';
-          lastError = '';
-        }
       } catch (e: any) {
         console.warn('ZYouTube [Transcript] Fallback scrape failed:', e);
+        lastError = 'TRANSCRIPT_PANEL_FAILED';
       }
     }
 

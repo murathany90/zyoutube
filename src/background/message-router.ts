@@ -312,21 +312,57 @@ async function fetchCaptionFromMainWorldInjected(captionUrl: string, format: str
   }
 }
 
-async function scrapeTranscriptPanelInjected(hideNativeTranscript: boolean = true): Promise<{ success: boolean; segments?: Array<{ startTimeMs: number; endTimeMs: number; durationMs: number; text: string; languageCode: string }>; error?: string }> {
+async function scrapeTranscriptPanelInjected(hideNativeTranscript: boolean = true, tlang?: string): Promise<{ success: boolean; segments?: Array<{ startTimeMs: number; endTimeMs: number; durationMs: number; text: string; languageCode: string }>; error?: string }> {
   const _log: string[] = [];
   const _w = (m: string) => { _log.push(m); console.log('ZYouTube Scrape:', m); };
 
   const getSegments = () => {
     let cues = document.querySelectorAll('transcript-segment-view-model, ytd-transcript-segment-renderer');
-    return Array.from(cues);
+    return Array.from(cues).filter(cue => {
+      const el = cue as HTMLElement;
+      return el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0;
+    });
   };
 
   try {
     _w('Starting scraping...');
     let weOpenedIt = false;
 
+    // Trigger auto-translate if tlang is provided
+    if (tlang) {
+      _w('Attempting to set player translation to: ' + tlang);
+      try {
+        const player = document.getElementById('movie_player') as any;
+        if (player && typeof player.setOption === 'function' && typeof player.getOption === 'function') {
+          const currentTrack = player.getOption('captions', 'track');
+          const originalLang = currentTrack ? currentTrack.languageCode : 'tr';
+          player.toggleSubtitlesOn();
+          player.setOption('captions', 'track', { languageCode: originalLang, translationLanguage: { languageCode: tlang } });
+          _w('Player option set for translation');
+          // Wait for DOM to update
+          await new Promise(r => setTimeout(r, 1000));
+        } else {
+          _w('Player API not available');
+        }
+      } catch (e: any) {
+        _w('Failed to set player translation: ' + e.message);
+      }
+    }
+
     // Step 1: Read already open native segments
     let segmentsNodes = getSegments();
+    
+    // If tlang is provided and panel is already open, close it so we can re-open it to apply translation
+    if (segmentsNodes.length > 0 && tlang) {
+      _w('Panel already open but tlang requested. Closing panel to force refresh...');
+      const closeBtn = document.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"] #visibility-button button, ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"] button[aria-label*="Close" i], ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"] button[aria-label*="kapat" i]');
+      if (closeBtn) {
+        (closeBtn as HTMLElement).click();
+        await new Promise(r => setTimeout(r, 800));
+        segmentsNodes = getSegments(); // Should be empty now
+      }
+    }
+
     if (segmentsNodes.length > 0) {
       _w('Segments already open, skipping click.');
     } else {
@@ -358,6 +394,29 @@ async function scrapeTranscriptPanelInjected(hideNativeTranscript: boolean = tru
           }
         }
         if (transcriptBtn) break;
+      }
+
+      // If not found, try to open the More Actions (...) menu
+      if (!transcriptBtn) {
+        _w('Transcript button not found in description, trying More Actions menu...');
+        const moreBtn = document.querySelector('ytd-menu-renderer yt-button-shape#button-shape button');
+        if (moreBtn) {
+          (moreBtn as HTMLElement).click();
+          await new Promise(r => setTimeout(r, 500));
+          
+          const popupAreas = document.querySelectorAll('ytd-menu-popup-renderer');
+          for (const area of Array.from(popupAreas)) {
+            const items = area.querySelectorAll('ytd-menu-service-item-renderer, tp-yt-paper-item, button, .yt-spec-button-shape-next');
+            for (const item of Array.from(items)) {
+              const text = (item.textContent || item.getAttribute('aria-label') || '').trim().toLowerCase();
+              if (text.includes('transkripti göster') || text.includes('show transcript') || (text.includes('transcript') && !text.includes('search')) || (text.includes('transkript') && !text.includes('ara'))) {
+                transcriptBtn = item as HTMLElement;
+                break;
+              }
+            }
+            if (transcriptBtn) break;
+          }
+        }
       }
 
       if (transcriptBtn) {
@@ -403,6 +462,48 @@ async function scrapeTranscriptPanelInjected(hideNativeTranscript: boolean = tru
           (collapseBtn as HTMLElement).click();
           _w('Collapsed description');
         }
+      }
+    }
+
+    // Step 2.5: If tlang is provided, try to select it from the language dropdown in the panel
+    if (tlang) {
+      _w('Step 2.5: Trying to select translation from transcript panel dropdown...');
+      try {
+        const langMenuBtn = document.querySelector('ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"] #language-menu button, #sort-menu button, .language-option button, .ytd-transcript-renderer #sort-menu button') as HTMLElement;
+        if (langMenuBtn) {
+           _w('Found language dropdown, clicking...');
+           langMenuBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+           langMenuBtn.click();
+           await new Promise(r => setTimeout(r, 600)); // Wait for popup to render
+
+           const popupItems = document.querySelectorAll('ytd-menu-popup-renderer tp-yt-paper-item, ytd-menu-popup-renderer ytd-menu-service-item-renderer, tp-yt-iron-dropdown tp-yt-paper-item, ytd-menu-popup-renderer yt-formatted-string');
+           _w(`Found ${popupItems.length} language items in dropdown`);
+           
+           let selected = false;
+           for (const item of Array.from(popupItems)) {
+             const text = (item.textContent || '').trim().toLowerCase();
+             // For English, match "english" or "ingilizce"
+             if (tlang === 'en' && (text.includes('ingilizce') || text.includes('english') || text.includes('eng'))) {
+                _w(`Clicking language item: ${text}`);
+                const clickableEl = item.closest('tp-yt-paper-item, ytd-menu-service-item-renderer') as HTMLElement || item;
+                clickableEl.click();
+                selected = true;
+                break;
+             }
+           }
+           if (selected) {
+             _w('Waiting for transcript segments to reload...');
+             await new Promise(r => setTimeout(r, 1200)); // Wait for segments to reload
+           } else {
+             _w('Could not find matching language in dropdown.');
+             // Click somewhere else to close dropdown
+             document.body.click();
+           }
+        } else {
+           _w('Language dropdown not found in panel.');
+        }
+      } catch (e: any) {
+        _w('Error selecting language from dropdown: ' + e.message);
       }
     }
 
@@ -561,7 +662,7 @@ function handleFetchCaptionFromMain(message: any, sendResponse: (response: any) 
     target: { tabId, frameIds: [0] },
     world: 'MAIN',
     func: fetchCaptionFromMainWorldInjected,
-    args: [track.baseUrl, format, tlang]
+    args: [track.baseUrl, format, tlang || null]
   }).then(results => {
     const result = results[0]?.result;
     if (result?.success && result.data) {
@@ -597,6 +698,8 @@ function handleTranscriptPanel(_message: any, sendResponse: (response: any) => v
     sendResponse({ success: false, error: 'NO_TAB' });
     return;
   }
+  
+  const { tlang } = _message;
 
   chrome.storage.local.get('panel_settings').then(data => {
     const hideNative = data.panel_settings?.hideNativeTranscript ?? true;
@@ -605,7 +708,7 @@ function handleTranscriptPanel(_message: any, sendResponse: (response: any) => v
       target: { tabId, frameIds: [0] },
       world: 'MAIN',
       func: scrapeTranscriptPanelInjected,
-      args: [hideNative]
+      args: [hideNative, tlang || null]
     }).then(results => {
       const result = results[0]?.result;
       if (result?.success && result.segments) {
