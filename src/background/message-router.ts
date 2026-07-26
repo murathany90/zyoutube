@@ -2,6 +2,8 @@ import { SummaryRequest } from '../ai/types';
 import { AITaskManager } from '../ai/task-manager';
 import { GemSettingsService } from '../gem/settings';
 import { captureNativeYouTubeCaption } from './native-caption-broker';
+import { setupOffscreenDocument } from './offscreen-manager';
+import { AISettingsService } from '../settings/ai-settings';
 
 export type ExtensionMessage =
   | { type: 'YOUTUBE_URL_CHANGED'; url: string }
@@ -17,7 +19,13 @@ export type ExtensionMessage =
   | { type: 'PANEL_SETTINGS_CHANGED' }
   | { type: 'COPY_TO_CLIPBOARD'; text: string }
   | { type: 'PING_BACKGROUND' }
-  | { type: 'TEST_CONNECTION'; providerId: any };
+  | { type: 'TEST_CONNECTION'; providerId: any }
+  | { type: 'API_SUMMARY_START'; taskId: string; videoId: string; request: any; config: any }
+  | { type: 'API_SUMMARY_PROGRESS'; taskId: string; videoId: string; message: string; progress: number }
+  | { type: 'API_SUMMARY_COMPLETED'; taskId: string; videoId: string; result: any }
+  | { type: 'API_SUMMARY_FAILED'; taskId: string; videoId: string; error: any }
+  | { type: 'API_SUMMARY_CANCEL'; taskId: string; videoId: string }
+  | { type: 'API_SUMMARY_HEARTBEAT'; taskId: string; videoId: string };
 
 interface CaptionTrackMessage {
   baseUrl: string;
@@ -61,6 +69,33 @@ export function setupMessageRouter() {
         return true;
       }
 
+      if (request.engine === 'openai-compatible') {
+        const taskState = {
+          taskId: request.taskId,
+          tabId,
+          videoId: request.video.videoId,
+          status: 'preparing',
+          startedAt: Date.now(),
+          lastHeartbeatAt: Date.now()
+        };
+        chrome.storage.session.set({ [`api_task_${request.taskId}`]: taskState }).catch(console.error);
+
+        AISettingsService.getProviderConfig('openai-compatible').then(config => {
+          return setupOffscreenDocument().then(() => config);
+        }).then(config => {
+          chrome.runtime.sendMessage({
+            type: 'API_SUMMARY_START',
+            taskId: request.taskId,
+            videoId: request.video.videoId,
+            request,
+            config
+          }).catch(console.error);
+        }).catch(console.error);
+
+        sendResponse({ success: true, taskId: request.taskId, accepted: true });
+        return true;
+      }
+
       AITaskManager.startTask(request, tabId, (status, msg, progress) => {
         chrome.tabs.sendMessage(tabId, {
           type: 'SUMMARY_PROGRESS',
@@ -68,13 +103,17 @@ export function setupMessageRouter() {
           status,
           message: msg,
           progress
-        }).catch(() => {});
+        }).catch((e) => {
+          console.error(`[AITaskManager] delivery failed for task ${request.taskId}:`, e);
+        });
       }).then((result) => {
         chrome.tabs.sendMessage(tabId, {
           type: 'SUMMARY_COMPLETED',
           taskId: request.taskId,
           result
-        }).catch(() => {});
+        }).catch((e) => {
+          console.error(`[AITaskManager] delivery failed for task ${request.taskId}:`, e);
+        });
       }).catch((error) => {
         chrome.tabs.sendMessage(tabId, {
           type: 'SUMMARY_FAILED',
@@ -84,7 +123,9 @@ export function setupMessageRouter() {
             userMessage: error.userMessage || error.message || 'Bir hata oluştu.',
             retryable: error.retryable ?? true
           }
-        }).catch(() => {});
+        }).catch((e) => {
+          console.error(`[AITaskManager] delivery failed for task ${request.taskId}:`, e);
+        });
       });
 
       sendResponse({ success: true });
@@ -94,7 +135,67 @@ export function setupMessageRouter() {
     // 4. CANCEL_SUMMARY - requires tab context
     if (message.type === 'CANCEL_SUMMARY') {
       const { taskId } = message;
+      
+      // Try offscreen first
+      chrome.storage.session.get(`api_task_${taskId}`).then((data) => {
+        if (data[`api_task_${taskId}`]) {
+          chrome.runtime.sendMessage({ type: 'API_SUMMARY_CANCEL', taskId, videoId: '' }).catch(console.error);
+          chrome.storage.session.remove(`api_task_${taskId}`).catch(console.error);
+        }
+      });
+      
       AITaskManager.cancelTask(taskId).catch(console.error);
+      sendResponse({ success: true });
+      return true;
+    }
+
+    // 5. API_SUMMARY_* Relay
+    if (message.type.startsWith('API_SUMMARY_') && message.type !== 'API_SUMMARY_START' && message.type !== 'API_SUMMARY_CANCEL') {
+      chrome.storage.session.get(`api_task_${(message as any).taskId}`).then((data) => {
+        const taskState = data[`api_task_${(message as any).taskId}`];
+        if (taskState && taskState.tabId) {
+           if (message.type === 'API_SUMMARY_HEARTBEAT') {
+              chrome.storage.session.set({ 
+                  [`api_task_${(message as any).taskId}`]: { ...taskState, lastHeartbeatAt: Date.now() } 
+              }).catch(console.error);
+              
+              chrome.tabs.sendMessage(taskState.tabId, {
+                  type: 'API_SUMMARY_HEARTBEAT',
+                  taskId: (message as any).taskId
+              }).catch(e => {
+                  console.error(`[API Task] delivery failed for task ${(message as any).taskId}:`, e);
+              });
+           } else if (message.type === 'API_SUMMARY_COMPLETED') {
+              chrome.storage.session.remove(`api_task_${(message as any).taskId}`).catch(console.error);
+              chrome.tabs.sendMessage(taskState.tabId, {
+                  type: 'SUMMARY_COMPLETED',
+                  taskId: (message as any).taskId,
+                  result: (message as any).result
+              }).catch(e => {
+                  console.error(`[API Task] delivery failed for task ${(message as any).taskId}:`, e);
+              });
+           } else if (message.type === 'API_SUMMARY_FAILED') {
+              chrome.storage.session.remove(`api_task_${(message as any).taskId}`).catch(console.error);
+              chrome.tabs.sendMessage(taskState.tabId, {
+                  type: 'SUMMARY_FAILED',
+                  taskId: (message as any).taskId,
+                  error: (message as any).error
+              }).catch(e => {
+                  console.error(`[API Task] delivery failed for task ${(message as any).taskId}:`, e);
+              });
+           } else if (message.type === 'API_SUMMARY_PROGRESS') {
+              chrome.tabs.sendMessage(taskState.tabId, {
+                  type: 'SUMMARY_PROGRESS',
+                  taskId: (message as any).taskId,
+                  status: 'summarizing',
+                  message: (message as any).message,
+                  progress: (message as any).progress
+              }).catch(e => {
+                  console.error(`[API Task] delivery failed for task ${(message as any).taskId}:`, e);
+              });
+           }
+        }
+      });
       sendResponse({ success: true });
       return true;
     }

@@ -49,7 +49,8 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        history: 'history.html'
+        history: 'history.html',
+        'api-worker': 'src/offscreen/api-worker.html'
       }
     }
   },

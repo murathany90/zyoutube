@@ -18,31 +18,51 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
   const [taskId, setTaskId] = useState<string | null>(null);
   const activeTaskIdRef = useRef<string | null>(null);
   const watchdogTimerRef = useRef<number | null>(null);
+  const absoluteTimeoutRef = useRef<number | null>(null);
   const [currentTranscript, setCurrentTranscript] = useState<TranscriptSegment[] | null>(null);
 
-  const clearWatchdog = () => {
+  const clearTimers = () => {
     if (watchdogTimerRef.current) {
       window.clearTimeout(watchdogTimerRef.current);
       watchdogTimerRef.current = null;
     }
+    if (absoluteTimeoutRef.current) {
+      window.clearTimeout(absoluteTimeoutRef.current);
+      absoluteTimeoutRef.current = null;
+    }
+  };
+
+  const startHeartbeatTimer = () => {
+    if (watchdogTimerRef.current) window.clearTimeout(watchdogTimerRef.current);
+    watchdogTimerRef.current = window.setTimeout(() => {
+      setIsProcessing(false);
+      setStatus('failed');
+      setError('Bağlantı koptu (Heartbeat alınamadı). Lütfen tekrar deneyin.');
+      if (activeTaskIdRef.current) {
+        sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId: activeTaskIdRef.current }).catch(console.error);
+        activeTaskIdRef.current = null;
+      }
+    }, 45000);
+  };
+
+  const startAbsoluteTimer = () => {
+    if (absoluteTimeoutRef.current) window.clearTimeout(absoluteTimeoutRef.current);
+    absoluteTimeoutRef.current = window.setTimeout(() => {
+      setIsProcessing(false);
+      setStatus('failed');
+      setError('API işlemi çok uzun sürdüğü için zaman aşımına uğradı (240s limit).');
+      if (activeTaskIdRef.current) {
+        sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId: activeTaskIdRef.current }).catch(console.error);
+        activeTaskIdRef.current = null;
+      }
+    }, 240000);
   };
 
   useEffect(() => {
-    if (isProcessing) {
-      clearWatchdog();
-      watchdogTimerRef.current = window.setTimeout(() => {
-        setIsProcessing(false);
-        setStatus('failed');
-        setError('API isteği tamamlanamadı veya arka plan yanıtı alınamadı. Lütfen tekrar deneyin.');
-        if (activeTaskIdRef.current) {
-          sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId: activeTaskIdRef.current }).catch(console.error);
-          activeTaskIdRef.current = null;
-        }
-      }, 195000);
-    } else {
-      clearWatchdog();
+    if (!isProcessing) {
+      clearTimers();
     }
-    return () => clearWatchdog();
+    return () => clearTimers();
   }, [isProcessing]);
 
   const [selectedEngine, setSelectedEngine] = useState<SummaryEngine>('gemini-gem');
@@ -79,10 +99,14 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
       if (message.type === 'SUMMARY_PROGRESS') {
         setStatus(message.status);
         if (message.message) setProgressMessage(message.message);
+        startHeartbeatTimer();
+      } else if (message.type === 'API_SUMMARY_HEARTBEAT') {
+        startHeartbeatTimer();
       } else if (message.type === 'SUMMARY_COMPLETED') {
         setResult(message.result);
         setStatus('completed');
         setIsProcessing(false);
+        clearTimers();
         // Kaydet
         if (currentTranscript) {
           HistoryService.saveSummary(
@@ -95,6 +119,7 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
         setError(message.error?.userMessage || 'Bir hata oluştu.');
         setStatus('failed');
         setIsProcessing(false);
+        clearTimers();
       }
     };
     chrome.runtime.onMessage.addListener(listener);
@@ -151,6 +176,11 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
 
       if (!startResponse?.success) {
         throw new Error(startResponse?.error || 'Özet görevi başlatılamadı.');
+      }
+      
+      if (startResponse?.accepted) {
+        startHeartbeatTimer();
+        startAbsoluteTimer();
       }
     } catch (e: any) {
       let msg = e.message || 'Transkript çekilemedi.';
