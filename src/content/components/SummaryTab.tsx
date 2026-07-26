@@ -35,7 +35,7 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
         setStatus('failed');
         setError('API isteği tamamlanamadı veya arka plan yanıtı alınamadı. Lütfen tekrar deneyin.');
         if (activeTaskIdRef.current) {
-          sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId: activeTaskIdRef.current }).catch(() => {});
+          sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId: activeTaskIdRef.current }).catch(console.error);
           activeTaskIdRef.current = null;
         }
       }, 195000);
@@ -65,7 +65,7 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
     setError(null);
     setIsProcessing(false);
     if (taskId) {
-      sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId }).catch(() => {});
+      sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId }).catch(console.error);
       setTaskId(null);
       activeTaskIdRef.current = null;
     }
@@ -165,7 +165,7 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
 
   const cancelSummary = () => {
     if (taskId) {
-      sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId }).catch(() => {});
+      sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId }).catch(console.error);
       setIsProcessing(false);
       setStatus('cancelled');
       setProgressMessage('İptal edildi.');
