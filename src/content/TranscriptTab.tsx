@@ -151,7 +151,6 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
              let secIndex = 0;
              for (let i = 0; i < mergedSegments.length; i++) {
                 const seg = mergedSegments[i];
-                let bestMatch = null;
                 let bestMatchIndex = -1;
                 let bestDiff = Infinity;
                 
@@ -166,7 +165,6 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
                    const isOverlap = (enSeg.startTimeMs < segEnd) && (enEnd > seg.startTimeMs);
                    
                    if (isOverlap) {
-                      bestMatch = enSeg;
                       bestMatchIndex = currIndex;
                       break; // Önce zaman aralığı örtüşmesini kabul et
                    }
@@ -174,14 +172,13 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
                    const diff = Math.abs(seg.startTimeMs - enSeg.startTimeMs);
                    if (diff < bestDiff && diff <= 5000) { // 5 saniyeden büyük farkı kabul etme
                       bestDiff = diff;
-                      bestMatch = enSeg;
                       bestMatchIndex = currIndex;
                    }
                 }
                 
-                if (bestMatch && bestMatchIndex >= 0) {
-                   seg.secondaryText = bestMatch.cleanText;
-                   secIndex = bestMatchIndex + 1; // aynı secondary segment tekrar kullanılmasın
+                if (bestMatchIndex >= 0) {
+                   seg.secondaryText = resEn.segments[bestMatchIndex].cleanText;
+                   secIndex = bestMatchIndex + 1;
                 }
              }
           }
@@ -278,13 +275,21 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
 
   // 4. Auto-sync scroll
   useEffect(() => {
-    if (!autoSync || searchQuery || !result) return;
-    
     const activeIndex = filteredSegments.findIndex(s => s.id === activeSegmentId);
-    if (activeIndex >= 0 && activeIndex >= visibleCount - 30) {
-       setVisibleCount(current => Math.max(current, activeIndex + 30));
-       return;
+    if (
+      autoSync &&
+      !searchQuery &&
+      activeIndex >= visibleCount - 30
+    ) {
+      setVisibleCount(current =>
+        Math.max(current, activeIndex + 30)
+      );
+      return;
     }
+  }, [autoSync, searchQuery, activeSegmentId, filteredSegments, visibleCount]);
+
+  useEffect(() => {
+    if (!autoSync || searchQuery || !result) return;
     
     if (activeSegmentRef.current && containerRef.current) {
        const container = containerRef.current;
@@ -296,7 +301,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
          behavior: 'smooth'
        });
     }
-  }, [currentTime, autoSync, searchQuery, activeSegmentId, result, filteredSegments, visibleCount]);
+  }, [currentTime, autoSync, searchQuery, result, activeSegmentId]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.target as HTMLDivElement;
