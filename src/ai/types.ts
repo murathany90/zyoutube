@@ -29,6 +29,24 @@ export interface SummaryRequest {
   engine?: SummaryEngine;
 }
 
+export interface CorrectionRequest {
+  taskId: string;
+  video: {
+    videoId: string;
+    title: string;
+  };
+  transcript: {
+    sourceLanguage: 'tr' | 'en';
+    segments: Array<{
+      id: string;
+      startTimeMs: number;
+      endTimeMs: number;
+      turkish: string;
+      english: string;
+    }>;
+  };
+}
+
 export interface LocalizedText {
   tr?: string;
   en?: string;

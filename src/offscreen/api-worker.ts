@@ -258,7 +258,7 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
     }).catch(console.error);
   }, 15000);
 
-  const timeoutMs = config.timeoutMs ?? 180000;
+  const timeoutMs = config.correctionTimeoutMs ?? 600000;
   const timeoutId = window.setTimeout(() => {
     controller.abort(new Error('Timeout'));
   }, timeoutMs);
@@ -327,9 +327,14 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
     }
 
     const sentences = CorrectionResponseParser.parse(aiResponseText);
+    const enrichedSentences = CorrectionResponseParser.enrichCorrectedSentences(
+      sentences,
+      request.transcript.segments,
+      request.transcript.sourceLanguage
+    );
     
     const finalResult = {
-      sentences,
+      sentences: enrichedSentences,
       latencyMs,
       timestamp: Date.now()
     };

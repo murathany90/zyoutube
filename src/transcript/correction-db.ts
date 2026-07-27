@@ -1,10 +1,18 @@
 import { CorrectedBilingualSentence } from '../settings/types';
 
+export const PROMPT_VERSION_CORRECTION = "bilingual-sentence-v2";
+
 export interface CorrectedTranscriptRecord {
   videoId: string;
+  videoTitle?: string;
   sourceLanguage: string;
+  sourceTrackLanguage?: string;
+  sourceTranscriptHash?: string;
+  promptVersion?: string;
+  model?: string;
   sentences: CorrectedBilingualSentence[];
   createdAt: number;
+  updatedAt?: number;
 }
 
 export class CorrectionDB {

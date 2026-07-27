@@ -58,6 +58,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
   const [correctedSentences, setCorrectedSentences] = useState<CorrectedBilingualSentence[] | null>(null);
   const [isCorrecting, setIsCorrecting] = useState(false);
   const [correctionError, setCorrectionError] = useState<string | null>(null);
+  const [pendingCorrection, setPendingCorrection] = useState(false);
   const activeCorrectionTaskIdRef = useRef<string | null>(null);
   
   const providerRef = useRef(new YouTubeTranscriptProvider());
@@ -97,12 +98,12 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
     const loadCorrection = async () => {
       const record = await CorrectionDB.get(videoId);
       if (active) {
-        if (record) {
+        if (record && record.promptVersion === "bilingual-sentence-v2") {
           setCorrectedSentences(record.sentences);
         } else {
           setCorrectedSentences(null);
         }
-        setCorrectionMode('original'); // reset mode
+        setCorrectionMode('original');
       }
     };
 
@@ -112,6 +113,20 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
     return () => { active = false; };
   }, [videoId]);
 
+  // Check hash when result changes
+  useEffect(() => {
+    if (result && correctedSentences) {
+      CorrectionDB.get(videoId).then(record => {
+         if (record) {
+           const currentHash = result.segments.map(s => s.id).join(',');
+           if (record.sourceTranscriptHash && record.sourceTranscriptHash !== currentHash) {
+              setCorrectedSentences(null);
+           }
+         }
+      });
+    }
+  }, [result]);
+
   // Listener for Correction API
   useEffect(() => {
     const listener = (message: any) => {
@@ -119,26 +134,25 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       
       if (message.type === 'CORRECTION_COMPLETED') {
         setIsCorrecting(false);
-        const enrichedSentences = message.result.sentences.map((sentence: CorrectedBilingualSentence) => {
-          const matchingSegments = result?.segments.filter(s => sentence.sourceSegmentIds.includes(s.id)) || [];
-          if (matchingSegments.length > 0) {
-            sentence.startTimeMs = matchingSegments[0].startTimeMs;
-            sentence.endTimeMs = matchingSegments[matchingSegments.length - 1].startTimeMs + matchingSegments[matchingSegments.length - 1].durationMs;
-            sentence.originalTurkish = matchingSegments.map(s => s.cleanText).join(' ');
-            sentence.originalEnglish = matchingSegments.map(s => s.secondaryText || '').join(' ');
-          }
-          return sentence;
-        });
+        const enrichedSentences = message.result.sentences;
 
         setCorrectedSentences(enrichedSentences);
         setCorrectionMode('both');
         
         // Save to DB
+        const currentHash = result?.segments.map(s => s.id).join(',');
+        const title = document.querySelector('title')?.textContent?.replace('- YouTube', '').trim() || 'Video';
+
         CorrectionDB.set({
           videoId,
-          sourceLanguage: 'tr', // default for now
+          videoTitle: title,
+          sourceLanguage: 'tr',
+          sourceTrackLanguage: result?.segments[0]?.languageCode || 'tr',
+          sourceTranscriptHash: currentHash,
+          promptVersion: 'bilingual-sentence-v2',
           sentences: enrichedSentences,
-          createdAt: Date.now()
+          createdAt: Date.now(),
+          updatedAt: Date.now()
         }).catch(console.error);
 
       } else if (message.type === 'CORRECTION_FAILED') {
@@ -429,7 +443,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
   );
   if (!result) return null;
 
-  const startCorrection = async () => {
+  const executeCorrection = async (segments: any[], sourceLang: string) => {
     try {
       setIsCorrecting(true);
       setCorrectionError(null);
@@ -438,15 +452,27 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       setCorrectionMode('both');
       activeCorrectionTaskIdRef.current = taskId;
 
-      // Extract video title from document or assume empty
       const title = document.querySelector('title')?.textContent?.replace('- YouTube', '').trim() || 'Video';
       
+      const isTurkishSource = sourceLang.startsWith('tr');
+      const mappedSegments = segments.map(s => {
+        const trText = isTurkishSource ? s.cleanText : s.secondaryText || '';
+        const enText = isTurkishSource ? s.secondaryText || '' : s.cleanText;
+        return {
+          id: s.id,
+          startTimeMs: s.startTimeMs,
+          endTimeMs: s.endTimeMs + s.durationMs, // Use proper end time
+          turkish: trText,
+          english: enText
+        };
+      });
+
       const request = {
         taskId,
         video: { videoId, title },
         transcript: {
-          languageCode: displayLanguage === 'both' ? 'tr-en' : displayLanguage,
-          segments: result.segments
+          sourceLanguage: isTurkishSource ? 'tr' : 'en',
+          segments: mappedSegments
         }
       };
 
@@ -463,6 +489,38 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       setCorrectionError(e.message || 'Düzeltme başlatılamadı.');
     }
   };
+
+  const startCorrection = async () => {
+    if (correctedSentences) {
+      if (!window.confirm('Zaten düzeltilmiş bir transkriptiniz var. Yeniden düzeltmek istediğinize emin misiniz?')) {
+        return;
+      }
+    }
+    
+    const hasSecondaryAnywhere = result?.segments.some(s => s.secondaryText && s.secondaryText.trim() !== '');
+    if (!hasSecondaryAnywhere) {
+      setDisplayLanguage('both');
+      setPendingCorrection(true);
+      return;
+    }
+    
+    if (result && result.segments.length > 0) {
+      executeCorrection(result.segments, result.segments[0].languageCode);
+    }
+  };
+
+  useEffect(() => {
+     if (pendingCorrection && result && !loading) {
+         const hasSecondaryAnywhere = result.segments.some(s => s.secondaryText && s.secondaryText.trim() !== '');
+         if (hasSecondaryAnywhere && result.segments.length > 0) {
+            setPendingCorrection(false);
+            executeCorrection(result.segments, result.segments[0].languageCode);
+         } else if (error || dualLangWarning) {
+            setPendingCorrection(false);
+            setCorrectionError('İkinci dil alınamadığı için API çağrısı iptal edildi.');
+         }
+     }
+  }, [pendingCorrection, result, loading, error, dualLangWarning]);
 
   return (
     <div className="flex flex-col gap-2 text-sm h-full overflow-hidden">
@@ -493,15 +551,13 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
             )}
           </div>
           <div className="text-xs text-black dark:text-white flex gap-2 items-center">
-            {!correctedSentences && (
-              <button 
-                onClick={startCorrection}
-                disabled={isCorrecting}
-                className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
-              >
-                {isCorrecting ? '⏳ Düzeltiliyor...' : '✨ Düzelt'}
-              </button>
-            )}
+            <button 
+              onClick={startCorrection}
+              disabled={isCorrecting || pendingCorrection}
+              className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+            >
+              {isCorrecting || pendingCorrection ? '⏳ Düzeltiliyor...' : (correctedSentences ? '✨ Yeniden Düzelt' : '✨ Düzelt')}
+            </button>
             <div className="flex items-center">
               <span className="font-semibold">Kalite: </span>
               <span className={result.quality?.level === 'high' ? 'text-green-600 dark:text-green-400 ml-1' : result.quality?.level === 'medium' ? 'text-yellow-600 dark:text-yellow-400 ml-1' : 'text-red-600 dark:text-red-400 ml-1'}>

@@ -1,17 +1,4 @@
-import { TranscriptSegment } from '../transcript/types';
-
-export interface CorrectionRequest {
-  taskId: string;
-  video: {
-    videoId: string;
-    title: string;
-  };
-  transcript: {
-    languageCode: string;
-    segments: TranscriptSegment[];
-  };
-}
-
+import { CorrectionRequest } from './types';
 export class CorrectionPromptBuilder {
   static buildSystemPrompt(): string {
     return `Sen uzman bir dilbilimci ve çevirmensin. Görevin, sana sağlanan bölük pörçük YouTube altyazılarını anlam bütünlüğü olan, gramer olarak doğru doğal cümleler halinde gruplandırmak ve çift dilli (Türkçe ve İngilizce) olarak düzeltmektir.
@@ -38,27 +25,13 @@ JSON ÇIKTI ŞABLONU:
   }
 
   static buildUserPrompt(request: CorrectionRequest): string {
-    const isTurkishSource = request.transcript.languageCode.startsWith('tr');
-    
-    const formattedSegments = request.transcript.segments.map(s => {
-      const trText = isTurkishSource ? s.cleanText : s.secondaryText || '';
-      const enText = isTurkishSource ? s.secondaryText || '' : s.cleanText;
-      return {
-        id: s.id,
-        startTimeMs: s.startTimeMs,
-        endTimeMs: s.endTimeMs,
-        turkish: trText,
-        english: enText
-      };
-    });
-
     return `Video Başlığı: ${request.video.title}
-Kaynak Dil: ${request.transcript.languageCode}
+Kaynak Dil: ${request.transcript.sourceLanguage}
 
 Lütfen aşağıdaki altyazı segmentlerini analiz et, anlam bütünlüğüne göre cümleler halinde grupla ve istenen JSON formatında döndür.
 
 Segmentler:
-${JSON.stringify({ sourceLanguage: request.transcript.languageCode, segments: formattedSegments }, null, 2)}`;
+${JSON.stringify({ sourceLanguage: request.transcript.sourceLanguage, segments: request.transcript.segments }, null, 2)}`;
   }
 
   static buildApiRequestBody(request: CorrectionRequest, config: any): any {
@@ -78,7 +51,8 @@ ${JSON.stringify({ sourceLanguage: request.transcript.languageCode, segments: fo
     
     if (config.enableReasoning === true) {
       body.chat_template_kwargs = { thinking: true, reasoning_effort: "high" };
-    } else if (config.responseMode === 'json') {
+    }
+    if (config.responseMode === 'json') {
       body.response_format = { type: 'json_object' };
     }
 

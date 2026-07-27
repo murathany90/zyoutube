@@ -10,6 +10,7 @@ import { LocalAIChecker, LocalAIStatus } from '../settings/local-ai';
 import { HistoryService, SavedSummary } from '../settings/history';
 import { PromptBuilder } from '../ai/prompt-builder';
 import { SummaryRequest } from '../ai/types';
+import { CorrectionPromptBuilder } from '../ai/prompt-correction';
 
 // ─── Toggle Component ──────────────────────────────
 
@@ -129,6 +130,7 @@ const Popup = () => {
   
   const [showPreview, setShowPreview] = useState(false);
   const [previewTab, setPreviewTab] = useState<'json'|'prompt'>('json');
+  const [previewRequestType, setPreviewRequestType] = useState<'summary'|'correction'>('summary');
 
   const testConnection = async (id: AIProviderId) => {
     const config = draftProvider || settings.providers[id];
@@ -445,19 +447,49 @@ const Popup = () => {
               </div>
               
               {showPreview && (() => {
-                 const mockRequest: SummaryRequest = {
-                   taskId: 'preview_1',
-                   video: { videoId: 'abc', title: 'Test Video', url: 'https://youtube.com/watch?v=abc' },
-                   transcript: { languageCode: 'tr', sourceType: 'manual', qualityLevel: 'high', qualityReasons: [], segments: [{ id: 's1', sequence: 1, startTimeMs: 0, endTimeMs: 5000, durationMs: 5000, text: 'Test içeriği', cleanText: 'Test içeriği', languageCode: 'tr' }] },
-                   options: { length: settings.defaultLength, outputLanguage: settings.defaultLanguage, includeKeyIdeas: true, includeSections: true, includeActionItems: true },
-                   engine: 'openai-compatible'
-                 };
-                 const requestBody = PromptBuilder.buildApiRequestBody(mockRequest, draftProvider || settings.providers['openai-compatible']);
-                 // Hide API Key
+                 let requestBody: any;
+                 if (previewRequestType === 'summary') {
+                   const mockRequest: SummaryRequest = {
+                     taskId: 'preview_1',
+                     video: { videoId: 'abc', title: 'Test Video', url: 'https://youtube.com/watch?v=abc' },
+                     transcript: { languageCode: 'tr', sourceType: 'manual', qualityLevel: 'high', qualityReasons: [], segments: [{ id: 's1', sequence: 1, startTimeMs: 0, endTimeMs: 5000, durationMs: 5000, text: 'Test içeriği', cleanText: 'Test içeriği', languageCode: 'tr' }] },
+                     options: { length: settings.defaultLength, outputLanguage: settings.defaultLanguage, includeKeyIdeas: true, includeSections: true, includeActionItems: true },
+                     engine: 'openai-compatible'
+                   };
+                   requestBody = PromptBuilder.buildApiRequestBody(mockRequest, draftProvider || settings.providers['openai-compatible']);
+                 } else {
+                   const mockCorrectionRequest: any = {
+                     taskId: 'preview_2',
+                     video: { videoId: 'abc', title: 'Test Video' },
+                     transcript: {
+                       sourceLanguage: 'en',
+                       segments: [{
+                         id: 'segment-1',
+                         startTimeMs: 0,
+                         endTimeMs: 3000,
+                         turkish: 'Bu örnek bir cümledir.',
+                         english: 'This is an example sentence.'
+                       }]
+                     }
+                   };
+                   requestBody = CorrectionPromptBuilder.buildApiRequestBody(mockCorrectionRequest, draftProvider || settings.providers['openai-compatible']);
+                 }
+                 
                  const displayBody = { ...requestBody };
                  
                  return (
                    <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '6px', overflow: 'hidden' }}>
+                      <div style={{ padding: '8px', borderBottom: '1px solid #e2e8f0', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                         <span style={{ fontSize: '11px', fontWeight: 600 }}>İstek Türü:</span>
+                         <select 
+                           style={{ ...selectStyle, padding: '4px', height: 'auto', flex: 1 }}
+                           value={previewRequestType}
+                           onChange={e => setPreviewRequestType(e.target.value as any)}
+                         >
+                           <option value="summary">Özet İsteği</option>
+                           <option value="correction">Transkript Düzeltme İsteği</option>
+                         </select>
+                      </div>
                       <div style={{ display: 'flex', background: '#f1f5f9', borderBottom: '1px solid #e2e8f0' }}>
                         <button onClick={() => setPreviewTab('json')} style={{ flex: 1, padding: '6px', background: previewTab === 'json' ? '#fff' : 'transparent', border: 'none', borderBottom: previewTab === 'json' ? '2px solid #3b82f6' : '2px solid transparent', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>JSON Gövdesi</button>
                         <button onClick={() => setPreviewTab('prompt')} style={{ flex: 1, padding: '6px', background: previewTab === 'prompt' ? '#fff' : 'transparent', border: 'none', borderBottom: previewTab === 'prompt' ? '2px solid #3b82f6' : '2px solid transparent', fontSize: '11px', fontWeight: 600, cursor: 'pointer' }}>Prompt (Sistem & Kullanıcı)</button>
@@ -467,8 +499,8 @@ const Popup = () => {
                           JSON.stringify(displayBody, null, 2)
                         ) : (
                           <>
-                            <strong>[Sistem]</strong><br/>{displayBody.messages[0].content}<br/><br/>
-                            <strong>[Kullanıcı]</strong><br/>{displayBody.messages[1].content}
+                            <strong>[Sistem]</strong><br/>{displayBody?.messages?.[0]?.content}<br/><br/>
+                            <strong>[Kullanıcı]</strong><br/>{displayBody?.messages?.[1]?.content}
                           </>
                         )}
                       </div>
@@ -491,7 +523,7 @@ const Popup = () => {
               )}
               
               <div style={{ marginTop: '12px', padding: '8px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: '11px', color: '#64748b', lineHeight: 1.4 }}>
-                API özetleri tek istekte gönderilir. En fazla 130.000 tokenlık bağlam kullanılır. Uzun transkriptler segment sınırında kısaltılır.
+                API özetleri tek istekte gönderilir. Uzun transkriptler segment sınırında kısaltılır.
               </div>
             </div>
           </div>

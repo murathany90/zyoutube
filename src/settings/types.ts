@@ -26,6 +26,7 @@ export interface AIProviderConfig {
   model?: string;
   baseUrl?: string;
   timeoutMs?: number;
+  correctionTimeoutMs?: number;
   temperature?: number;
   maxTokens?: number;
   contextWindowTokens?: number;
@@ -56,6 +57,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
       model: 'deepseek-chat',
       baseUrl: 'https://api.deepseek.com/v1',
       timeoutMs: 180000,
+      correctionTimeoutMs: 600000,
       temperature: 0.7,
       contextWindowTokens: 130000,
       isSessionStorage: false
