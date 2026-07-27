@@ -31,7 +31,7 @@ const HighlightedText = ({ text, highlight, exact }: { text: string, highlight: 
   }
 };
 
-export const TranscriptTab = ({ videoId }: { videoId: string }) => {
+export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string, onTranscriptLoaded?: (result: TranscriptResult | null) => void }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -62,7 +62,7 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
     const initTracks = async () => {
       setLoading(true);
       setError(null);
-      setResult(null);
+      // Removed setResult(null) as requested by rule 6 (Dil değişimi başarısız olursa eski transkripti koru)
       setTracks([]);
       setSelectedTrackUrl(''); // Yeni video için url'yi sıfırla
       
@@ -104,6 +104,7 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
       setLoading(true);
       setError(null);
       setDualLangWarning(null);
+      let onParentAbort: (() => void) | null = null;
       try {
         const trackToLoad = tracks.find(t => t.baseUrl === selectedTrackUrl);
         if (!trackToLoad) return;
@@ -121,8 +122,8 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
           // Link parent abort to both children
           const parentSignal = abortControllerRef.current?.signal;
           if (parentSignal) {
-            const onParentAbort = () => { abortTr.abort(); abortEn.abort(); };
-            parentSignal.addEventListener('abort', onParentAbort, { once: true });
+            onParentAbort = () => { abortTr.abort(); abortEn.abort(); };
+            parentSignal.addEventListener('abort', onParentAbort);
           }
 
           // Fetch primary language (Turkish)
@@ -138,29 +139,50 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
             if (active) setDualLangWarning('İngilizce çeviri alınamadı. Yalnızca Türkçe gösteriliyor.');
           }
           
-          // Match segments by closest startTimeMs instead of index
+          
+          // Fix 4: İki işaretçili eşleştirme
           const mergedSegments = resTr.segments.map((seg) => {
-            let secondaryText: string | undefined;
-            if (resEn && resEn.segments.length > 0) {
-              // Find the closest matching English segment by startTimeMs
-              let bestMatch = resEn.segments[0];
-              let bestDiff = Math.abs(seg.startTimeMs - bestMatch.startTimeMs);
-              for (let j = 1; j < resEn.segments.length; j++) {
-                const diff = Math.abs(seg.startTimeMs - resEn.segments[j].startTimeMs);
-                if (diff < bestDiff) {
-                  bestDiff = diff;
-                  bestMatch = resEn.segments[j];
-                } else if (diff > bestDiff) {
-                  break; // Segments are chronological, no need to continue
-                }
-              }
-              // Only match if within 5 seconds tolerance
-              if (bestDiff <= 5000) {
-                secondaryText = bestMatch.cleanText;
-              }
-            }
-            return { ...seg, secondaryText };
+            return { ...seg };
           });
+          
+          if (resEn && resEn.segments.length > 0) {
+             let secIndex = 0;
+             for (let i = 0; i < mergedSegments.length; i++) {
+                const seg = mergedSegments[i];
+                let bestMatch = null;
+                let bestDiff = Infinity;
+                
+                while (secIndex < resEn.segments.length) {
+                   const enSeg = resEn.segments[secIndex];
+                   // Örtüşme kontrolü (startTimeMs ile endTimeMs arasında)
+                   const segEnd = seg.startTimeMs + seg.durationMs;
+                   const enEnd = enSeg.startTimeMs + enSeg.durationMs;
+                   const isOverlap = (enSeg.startTimeMs < segEnd) && (enEnd > seg.startTimeMs);
+                   
+                   if (isOverlap) {
+                      bestMatch = enSeg;
+                      secIndex++;
+                      break;
+                   }
+                   
+                   const diff = Math.abs(seg.startTimeMs - enSeg.startTimeMs);
+                   if (diff < bestDiff && diff <= 5000) {
+                      bestDiff = diff;
+                      bestMatch = enSeg;
+                   }
+                   
+                   if (enSeg.startTimeMs > seg.startTimeMs) {
+                      break;
+                   }
+                   secIndex++;
+                }
+                
+                if (bestMatch) {
+                   seg.secondaryText = bestMatch.cleanText;
+                }
+             }
+          }
+          
           
           res = { ...resTr, segments: mergedSegments };
         } else {
@@ -168,19 +190,27 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
           res = await providerRef.current.fetchTranscript(videoId, trackToLoad, abortControllerRef.current || undefined, tlang);
         }
 
-        if (active) setResult(res);
+        if (active) {
+            setResult(res);
+            if (onTranscriptLoaded) onTranscriptLoaded(res);
+        }
       } catch (err: any) {
         if (err.name === 'AbortError') return;
         if (active) setError(err.message || 'Transkript alınırken bir hata oluştu.');
       } finally {
         if (active) setLoading(false);
+        const parentSignal = abortControllerRef.current?.signal;
+        if (parentSignal && onParentAbort) {
+          parentSignal.removeEventListener('abort', onParentAbort);
+        }
       }
     };
 
     fetchTranscripts();
 
     return () => { 
-      active = false; 
+      active = false;
+      if (abortControllerRef.current) abortControllerRef.current.abort();
     };
   }, [selectedTrackUrl, videoId, tracks, displayLanguage]);
 
@@ -197,12 +227,7 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
     return () => video.removeEventListener('timeupdate', handleTimeUpdate);
   }, [videoId]);
 
-  // 4. Auto-sync scroll
-  useEffect(() => {
-    if (autoSync && activeSegmentRef.current && containerRef.current && !searchQuery) {
-       activeSegmentRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-  }, [currentTime, autoSync, searchQuery]);
+  // (Moved Auto-sync scroll below declarations)
 
   const seekTo = (ms: number) => {
     const videoElements = document.querySelectorAll('video');
@@ -247,6 +272,29 @@ export const TranscriptTab = ({ videoId }: { videoId: string }) => {
 
   // Virtual/paginated rendering
   const [visibleCount, setVisibleCount] = useState(150);
+
+  // 4. Auto-sync scroll
+  useEffect(() => {
+    if (autoSync && activeSegmentRef.current && containerRef.current && !searchQuery) {
+       const container = containerRef.current;
+       const activeEl = activeSegmentRef.current;
+       const targetTop = activeEl.offsetTop - container.clientHeight / 2 + activeEl.clientHeight / 2;
+       
+       container.scrollTo({
+         top: Math.max(0, targetTop),
+         behavior: 'smooth'
+       });
+       
+       // Otomatik takipte visible count'u artır (Fix 3)
+       if (result) {
+         const activeIndex = filteredSegments.findIndex(s => s.id === activeSegmentId);
+         if (activeIndex >= 0 && activeIndex + 30 >= visibleCount) {
+           setVisibleCount(current => Math.max(current, activeIndex + 30));
+         }
+       }
+    }
+  }, [currentTime, autoSync, searchQuery, activeSegmentId, result, filteredSegments, visibleCount]);
+
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.target as HTMLDivElement;
     if (target.scrollHeight - target.scrollTop <= target.clientHeight + 100) {

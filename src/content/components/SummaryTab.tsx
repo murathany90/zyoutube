@@ -8,7 +8,7 @@ import { HistoryService } from '../../settings/history';
 import { TranscriptSegment } from '../../transcript/types';
 import { renderSimpleMarkdown } from '../../utils/formatters';
 
-export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: { videoId: string; title: string; url: string; activeSection?: 'summary' | 'sonuc' | 'cikarimlar' | 'arastir' }) => {
+export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', currentTranscript: externalTranscript }: { videoId: string; title: string; url: string; activeSection?: 'summary' | 'sonuc' | 'cikarimlar' | 'arastir'; currentTranscript?: any }) => {
   const [status, setStatus] = useState<AITaskStatus>('queued');
   const [progressMessage, setProgressMessage] = useState<string>('');
   const [result, setResult] = useState<SummaryResult | null>(null);
@@ -155,18 +155,37 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary' }: {
       if (!track) track = tracks.find(t => t.sourceType === 'manual');
       if (!track) track = tracks[0];
       
-      const transcriptResult = await provider.fetchTranscript(videoId, track);
-      setCurrentTranscript(transcriptResult.segments);
+      let transcriptSegments = [];
+      let transcriptQualityLevel = 'medium';
+      let transcriptQualityReasons = [];
+      
+      if (externalTranscript && externalTranscript.segments && externalTranscript.segments.length > 0) {
+        transcriptSegments = externalTranscript.segments;
+        transcriptQualityLevel = externalTranscript.quality?.level || 'medium';
+        transcriptQualityReasons = externalTranscript.quality?.reasons || [];
+        track = { 
+          languageCode: externalTranscript.languageCode || track.languageCode, 
+          sourceType: externalTranscript.sourceType || track.sourceType || 'unknown',
+          baseUrl: ''
+        } as any;
+      } else {
+        const transcriptResult = await provider.fetchTranscript(videoId, track);
+        transcriptSegments = transcriptResult.segments;
+        transcriptQualityLevel = transcriptResult.quality?.level || 'medium';
+        transcriptQualityReasons = transcriptResult.quality?.reasons || [];
+      }
+      
+      setCurrentTranscript(transcriptSegments);
 
       const request: SummaryRequest = {
         taskId: `task_${Date.now()}`,
         video: { videoId, title, url },
         transcript: {
-          languageCode: track.languageCode,
-          sourceType: track.sourceType || 'unknown',
-          qualityLevel: transcriptResult.quality?.level || 'medium',
-          qualityReasons: transcriptResult.quality?.reasons || [],
-          segments: transcriptResult.segments,
+          languageCode: track?.languageCode || 'tr',
+          sourceType: track?.sourceType || 'unknown',
+          qualityLevel: transcriptQualityLevel as any,
+          qualityReasons: transcriptQualityReasons,
+          segments: transcriptSegments,
         },
         options: {
           length: selectedLength,

@@ -41,11 +41,14 @@ type PanelTab = 'summary' | 'transcript' | 'sonuc' | 'cikarimlar' | 'arastir';
 
 const Panel = ({ videoId, isInvalidated }: { videoId: string; isInvalidated: boolean }) => {
   const [activeTab, setActiveTab] = useState<PanelTab>('transcript');
+  const [currentTranscript, setCurrentTranscript] = useState<any>(null);
+  
   const title = document.querySelector('h1.ytd-watch-metadata')?.textContent?.trim() || 'Bilinmeyen Video';
   const url = window.location.href;
 
   useEffect(() => {
     setActiveTab('transcript');
+    setCurrentTranscript(null);
   }, [videoId]);
 
   const tabs: { id: PanelTab; label: string; enabled: boolean }[] = [
@@ -130,14 +133,14 @@ const Panel = ({ videoId, isInvalidated }: { videoId: string; isInvalidated: boo
           <div className="zyoutube-panel-content" style={{
             flex: 1,
             minHeight: 0,
-            overflowY: 'auto',
+            overflowY: activeTab === 'transcript' ? 'hidden' : 'auto',
             padding: '12px',
           }}>
             <div style={{ display: ['summary', 'sonuc', 'cikarimlar', 'arastir'].includes(activeTab) ? 'block' : 'none' }}>
-              <SummaryTab videoId={videoId} title={title} url={url} activeSection={activeTab as 'summary' | 'sonuc' | 'cikarimlar' | 'arastir'} />
+              <SummaryTab videoId={videoId} title={title} url={url} activeSection={activeTab as 'summary' | 'sonuc' | 'cikarimlar' | 'arastir'} currentTranscript={currentTranscript} />
             </div>
-            <div style={{ display: activeTab === 'transcript' ? 'block' : 'none' }}>
-              <TranscriptTab videoId={videoId} />
+            <div style={{ display: activeTab === 'transcript' ? 'block' : 'none', height: '100%' }}>
+              <TranscriptTab videoId={videoId} onTranscriptLoaded={setCurrentTranscript} />
             </div>
           </div>
         </>
