@@ -4,7 +4,6 @@ import { formatTime, renderSimpleMarkdown } from '../utils/formatters';
 import { SummaryEngine } from '../gem/types';
 import { CorrectionDB, CorrectedTranscriptRecord } from '../transcript/correction-db';
 import { DictionaryDB, StudyWord } from '../dictionary/dictionary-db';
-import { WordDictionaryPopup } from '../content/components/WordDictionaryPopup';
 
 export const HistoryPage = () => {
   const [summary, setSummary] = useState<SavedSummary | null>(null);
@@ -22,14 +21,7 @@ export const HistoryPage = () => {
 
   const [activeTab, setActiveTab] = useState<'summary' | 'transcript' | 'corrected' | 'words'>('summary');
 
-  const [activePopup, setActivePopup] = useState<{
-    word: string;
-    englishSentence: string;
-    turkishSentence: string;
-    timestampMs: number;
-    correctedSentenceId?: string;
-    position: { top: number; left: number };
-  } | null>(null);
+
 
   useEffect(() => {
     const hash = window.location.hash.replace('#', '');
@@ -96,22 +88,12 @@ export const HistoryPage = () => {
     window.open(url.toString(), '_blank');
   };
 
-  const handleWordClick = (e: React.MouseEvent<HTMLSpanElement>, word: string, englishSentence: string, turkishSentence: string, timestampMs: number, correctedSentenceId?: string) => {
+  const handleWordClick = (e: React.MouseEvent<HTMLSpanElement>) => {
     e.stopPropagation();
-    setActivePopup({
-      word,
-      englishSentence,
-      turkishSentence,
-      timestampMs,
-      correctedSentenceId,
-      position: { 
-        top: e.clientY + window.scrollY + 20, 
-        left: Math.min(e.clientX, window.innerWidth - 330)
-      }
-    });
+    // Dictionary popup disabled in History view
   };
 
-  const renderClickableWords = (content: string, englishSentence: string, turkishSentence: string, timestampMs: number, id?: string) => {
+  const renderClickableWords = (content: string) => {
     if (!content) return null;
     const wordParts = content.split(/([a-zA-Z]+(?:['’'-][a-zA-Z]+)*)/);
     return wordParts.map((wp, j) => {
@@ -121,7 +103,7 @@ export const HistoryPage = () => {
             key={j}
             className="cursor-pointer hover:bg-blue-100 hover:underline transition-colors"
             style={{ borderRadius: '2px' }}
-            onClick={(e) => handleWordClick(e, wp, englishSentence, turkishSentence, timestampMs, id)}
+            onClick={(e) => handleWordClick(e)}
           >
             {wp}
           </span>
@@ -384,7 +366,7 @@ export const HistoryPage = () => {
                             <>
                               <div style={{ color: '#d97706', fontSize: '12px', fontWeight: 'bold' }}>Orijinal EN</div>
                               <div style={{ color: '#d97706' }}>
-                                {renderClickableWords(seg.originalEnglish, seg.originalEnglish, seg.originalTurkish, seg.startTimeMs, seg.id)}
+                                {renderClickableWords(seg.originalEnglish)}
                               </div>
                             </>
                           )}
@@ -398,7 +380,7 @@ export const HistoryPage = () => {
                         <>
                           <div style={{ color: '#b45309', fontSize: '12px', fontWeight: 'bold' }}>Düzeltilmiş EN</div>
                           <div style={{ color: '#b45309' }}>
-                            {renderClickableWords(seg.correctedEnglish, seg.correctedEnglish, seg.correctedTurkish, seg.startTimeMs, seg.id)}
+                            {renderClickableWords(seg.correctedEnglish)}
                           </div>
                         </>
                       )}
@@ -521,15 +503,6 @@ export const HistoryPage = () => {
         </div>
 
       </div>
-
-      {activePopup && summary && (
-        <WordDictionaryPopup
-          {...activePopup}
-          videoId={summary.videoId}
-          videoTitle={summary.title}
-          onClose={() => setActivePopup(null)}
-        />
-      )}
 
     </div>
   );

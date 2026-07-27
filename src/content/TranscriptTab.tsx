@@ -5,6 +5,8 @@ import { CorrectedBilingualSentence } from '../settings/types';
 import { sendRuntimeMessage } from './runtime-messenger';
 import { WordDictionaryPopup } from './components/WordDictionaryPopup';
 
+const ENABLE_DICTIONARY_POPUP = true;
+
 const HighlightedText = ({ 
   text, 
   highlight, 
@@ -27,22 +29,27 @@ const HighlightedText = ({
   onWordClick?: (e: React.MouseEvent<HTMLSpanElement>, word: string, engSent: string, trSent: string, time: number, id?: string) => void
 }) => {
   const renderClickableWords = (content: string) => {
-    if (!isEnglish || !onWordClick || !englishSentence) return content;
-    const wordParts = content.split(/([a-zA-Z]+(?:['’'-][a-zA-Z]+)*)/);
-    return wordParts.map((wp, j) => {
-      if (/^[a-zA-Z]+(?:['’'-][a-zA-Z]+)*$/.test(wp)) {
-        return (
-          <span
-            key={j}
-            className="cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/50 hover:underline decoration-blue-300 dark:decoration-blue-700 rounded px-0.5 -mx-0.5 transition-colors inline-block"
-            onClick={(e) => onWordClick(e, wp, englishSentence, turkishSentence || '', timestampMs || 0, correctedSentenceId)}
-          >
-            {wp}
-          </span>
-        );
-      }
-      return <span key={j}>{wp}</span>;
-    });
+    if (!ENABLE_DICTIONARY_POPUP || !isEnglish || !onWordClick || !englishSentence) return content;
+    try {
+      const wordParts = content.split(/([a-zA-Z]+(?:['’'-][a-zA-Z]+)*)/);
+      return wordParts.map((wp, j) => {
+        if (/^[a-zA-Z]+(?:['’'-][a-zA-Z]+)*$/.test(wp)) {
+          return (
+            <span
+              key={j}
+              className="cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/50 hover:underline decoration-blue-300 dark:decoration-blue-700 rounded px-0.5 -mx-0.5 transition-colors inline-block"
+              onClick={(e) => onWordClick(e, wp, englishSentence, turkishSentence || '', timestampMs || 0, correctedSentenceId)}
+            >
+              {wp}
+            </span>
+          );
+        }
+        return <span key={j}>{wp}</span>;
+      });
+    } catch (err) {
+      console.warn('Clickable words render error', err);
+      return content;
+    }
   };
 
   if (!highlight.trim()) {
@@ -145,6 +152,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
     let active = true;
     
     const initTracks = async () => {
+      console.log(`[Transcript] tracks loading (videoId: ${videoId})`);
       setLoading(true);
       setError(null);
       setResult(null); // Clear result on video change
@@ -153,16 +161,24 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       setSelectedTrackUrl(''); // Yeni video için url'yi sıfırla
       
       try {
-        const availableTracks = await providerRef.current.getAvailableTracks(videoId);
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error('Track yükleme zaman aşımına uğradı.')), 20000);
+        });
+        const tracksPromise = providerRef.current.getAvailableTracks(videoId);
+        const availableTracks = await Promise.race([tracksPromise, timeoutPromise]);
+        
         if (active) {
+          console.log(`[Transcript] tracks loaded (${availableTracks.length})`);
           if (availableTracks.length === 0) {
             setError('Bu videoda erişilebilir manuel veya otomatik altyazı bulunamadı.');
           } else {
             setTracks(availableTracks);
             setSelectedTrackUrl(availableTracks[0].baseUrl);
+            console.log(`[Transcript] selected track: ${availableTracks[0].languageCode}`);
           }
         }
       } catch (err: any) {
+        console.error(`[Transcript] failed`, err);
         if (active) setError(err.message || 'Kanallar yüklenirken hata oluştu.');
       } finally {
         if (active) setLoading(false);
@@ -170,19 +186,22 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
     };
 
     const loadCorrection = async () => {
-      const record = await CorrectionDB.get(videoId);
-      if (active) {
-        if (record && record.promptVersion === "bilingual-sentence-v2") {
-          setCorrectedSentences(record.sentences);
-        } else {
-          setCorrectedSentences(null);
+      try {
+        const record = await CorrectionDB.get(videoId);
+        if (active) {
+          if (record && record.promptVersion === "bilingual-sentence-v2") {
+            setCorrectedSentences(record.sentences);
+          } else {
+            setCorrectedSentences(null);
+          }
+          setCorrectionMode('original');
         }
-        setCorrectionMode('original');
+      } catch (e) {
+        console.warn('CorrectionDB.get failed', e);
       }
     };
 
-    initTracks();
-    loadCorrection();
+    Promise.allSettled([initTracks(), loadCorrection()]);
     
     return () => { active = false; };
   }, [videoId]);
@@ -271,6 +290,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       setDualLangWarning(null);
       let onParentAbort: (() => void) | null = null;
       try {
+        console.log(`[Transcript] fetch started (videoId: ${videoId})`);
         const trackToLoad = tracks.find(t => t.baseUrl === selectedTrackUrl);
         if (!trackToLoad) return;
         
@@ -293,17 +313,19 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
 
           // Fetch primary language (Turkish)
           const resTr = await providerRef.current.fetchTranscript(videoId, trackToLoad, abortTr, tlangTr);
+          console.log(`[Transcript] primary received (dil: ${resTr.segments[0]?.languageCode}, segment: ${resTr.segments.length})`);
+
           
           // Fetch secondary language (English) — wrapped in try/catch
           let resEn: TranscriptResult | null = null;
           try {
             resEn = await providerRef.current.fetchTranscript(videoId, trackToLoad, abortEn, tlangEn);
+            if (resEn) console.log(`[Transcript] secondary received (dil: ${resEn.segments[0]?.languageCode}, segment: ${resEn.segments.length})`);
           } catch (enErr: any) {
             if (enErr.name === 'AbortError') throw enErr; // Re-throw abort
             console.warn('ZYouTube: İngilizce transkript alınamadı:', enErr.message);
             if (active) setDualLangWarning('İngilizce çeviri alınamadı. Yalnızca Türkçe gösteriliyor.');
           }
-          
           
           // Fix 4: İki işaretçili eşleştirme
           const mergedSegments = resTr.segments.map((seg) => {
@@ -355,10 +377,12 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
 
         if (active) {
             setResult(res);
+            console.log(`[Transcript] result committed`);
             if (onTranscriptLoaded) onTranscriptLoaded(res);
         }
       } catch (err: any) {
         if (err.name === 'AbortError') return;
+        console.error(`[Transcript] failed`, err);
         if (active) setError(err.message || 'Transkript alınırken bir hata oluştu.');
       } finally {
         if (active) setLoading(false);
@@ -523,14 +547,6 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
     }
   }, [searchQuery, exactMatch, selectedTrackUrl, displayLanguage]);
 
-  if (loading && !result) return <div className="p-4 text-sm animate-pulse">Transkript yükleniyor...</div>;
-  if (error && !result) return (
-    <div className="p-4 text-sm text-red-500 bg-red-50 dark:bg-red-900/20 rounded h-full flex flex-col items-center justify-center gap-3">
-      <span>{error}</span>
-      <button onClick={() => setReloadCounter(c => c + 1)} className="px-3 py-1 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200 rounded hover:bg-red-200">Tekrar Dene</button>
-    </div>
-  );
-  if (!result) return null;
 
   const executeCorrection = async (segments: any[], sourceLang: string) => {
     try {
@@ -631,6 +647,15 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
          }
      }
   }, [pendingCorrection, result, loading, error, dualLangWarning]);
+
+  if (loading && !result) return <div className="p-4 text-sm animate-pulse">Transkript yükleniyor...</div>;
+  if (error && !result) return (
+    <div className="p-4 text-sm text-red-500 bg-red-50 dark:bg-red-900/20 rounded h-full flex flex-col items-center justify-center gap-3">
+      <span>{error}</span>
+      <button onClick={() => setReloadCounter(c => c + 1)} className="px-3 py-1 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200 rounded hover:bg-red-200">Tekrar Dene</button>
+    </div>
+  );
+  if (!result) return null;
 
   return (
     <div className="flex flex-col gap-2 text-sm h-full overflow-hidden">

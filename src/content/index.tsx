@@ -1,5 +1,20 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, Component, ErrorInfo } from 'react';
 import { createRoot, Root } from 'react-dom/client';
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', (e) => {
+    if (e.filename && e.filename.includes('zyoutube')) {
+      console.error('[ZYouTube Global Error]', e.message, e.filename, e.lineno);
+    } else if (e.error?.stack?.includes('zyoutube') || e.error?.stack?.includes('youtube-ai')) {
+      console.error('[ZYouTube Global Error]', e.error?.message, e.error?.stack);
+    }
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    if (e.reason?.stack?.includes('zyoutube') || e.reason?.stack?.includes('youtube-ai')) {
+      console.error('[ZYouTube Unhandled Rejection]', e.reason?.message, e.reason?.stack);
+    }
+  });
+}
 import panelCss from '../styles/content-panel.css?inline';
 import { TranscriptTab } from './TranscriptTab';
 import { SummaryTab } from './components/SummaryTab';
@@ -33,6 +48,38 @@ const ExtensionInvalidated = () => (
     </button>
   </div>
 );
+
+class ErrorBoundary extends Component<{ children: React.ReactNode, componentName: string }, { hasError: boolean }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(_error: Error) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error(`[ZYouTube UI Error]\n${this.props.componentName}\n${error.message}\n${error.stack || errorInfo.componentStack}`);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: '24px', textAlign: 'center', color: 'var(--zy-error-text, #dc2626)' }}>
+          <p style={{ marginBottom: '16px' }}>Eklenti arayüzünde hata oluştu.</p>
+          <button 
+            onClick={() => this.setState({ hasError: false })}
+            style={{ padding: '8px 16px', backgroundColor: '#ef4444', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+          >
+            Paneli Yeniden Yükle
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ============================================================================
 // MAIN PANEL COMPONENT (no close button)
@@ -137,10 +184,14 @@ const Panel = ({ videoId, isInvalidated }: { videoId: string; isInvalidated: boo
             padding: '12px',
           }}>
             <div style={{ display: ['summary', 'sonuc', 'cikarimlar', 'arastir'].includes(activeTab) ? 'block' : 'none' }}>
-              <SummaryTab videoId={videoId} title={title} url={url} activeSection={activeTab as 'summary' | 'sonuc' | 'cikarimlar' | 'arastir'} currentTranscript={currentTranscript} />
+              <ErrorBoundary key={videoId + 'summary'} componentName="SummaryTab">
+                <SummaryTab videoId={videoId} title={title} url={url} activeSection={activeTab as 'summary' | 'sonuc' | 'cikarimlar' | 'arastir'} currentTranscript={currentTranscript} />
+              </ErrorBoundary>
             </div>
             <div style={{ display: activeTab === 'transcript' ? 'block' : 'none', height: '100%' }}>
-              <TranscriptTab videoId={videoId} onTranscriptLoaded={setCurrentTranscript} />
+              <ErrorBoundary key={videoId + 'transcript'} componentName="TranscriptTab">
+                <TranscriptTab videoId={videoId} onTranscriptLoaded={setCurrentTranscript} />
+              </ErrorBoundary>
             </div>
           </div>
         </>
@@ -265,6 +316,10 @@ class YouTubePanelManager {
 
   private async pingBackground(): Promise<boolean> {
     if (this.isInvalidated) return false;
+    if (!chrome.runtime?.id) {
+      this.handleContextInvalidated();
+      return false;
+    }
     try {
       const response = await sendRuntimeMessage<{ type: 'PING_BACKGROUND' }, { success: boolean }>(
         { type: 'PING_BACKGROUND' },

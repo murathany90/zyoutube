@@ -40,6 +40,7 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isSaved, setIsSaved] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [safePosition, setSafePosition] = useState(position);
 
   const popupRef = useRef<HTMLDivElement>(null);
 
@@ -105,27 +106,24 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
   useEffect(() => {
     if (popupRef.current) {
       const rect = popupRef.current.getBoundingClientRect();
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
+      // Enclosing container bounds
+      const container = document.querySelector('.zyoutube-panel-content') || document.body;
+      const containerRect = container.getBoundingClientRect();
       
-      let newLeft = left;
-      let newTop = top;
-      let changed = false;
-
-      if (rect.right > viewportWidth) {
-        newLeft = Math.max(10, viewportWidth - rect.width - 10);
-        changed = true;
+      let newLeft = position.left;
+      let newTop = position.top;
+      
+      if (newLeft + rect.width > containerRect.width) {
+        newLeft = Math.max(10, containerRect.width - rect.width - 10);
       }
       
-      if (rect.bottom > viewportHeight) {
-        newTop = Math.max(10, viewportHeight - rect.height - 10);
-        changed = true;
+      // Calculate top relative to container (subtracting scroll offset isn't strictly necessary if it's already accounted for, but we ensure it fits)
+      // Usually position is passed relative to scroll area. Let's just clamp the right side and bottom side.
+      if (newTop + rect.height > container.scrollHeight) {
+        newTop = Math.max(10, container.scrollHeight - rect.height - 10);
       }
       
-      if (changed) {
-        popupRef.current.style.left = `${newLeft}px`;
-        popupRef.current.style.top = `${newTop}px`;
-      }
+      setSafePosition({ left: newLeft, top: newTop });
     }
   }, [position, data]);
 
@@ -173,15 +171,17 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
     }
   };
 
-  // Keep inside viewport bounds
-  const top = Math.max(10, position.top);
-  const left = Math.max(10, position.left);
-
   return (
     <div
       ref={popupRef}
-      className="absolute z-50 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-[90%] max-w-[320px] max-h-[400px] overflow-y-auto flex flex-col"
-      style={{ top, left }}
+      className="absolute bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-4 z-50 text-left flex flex-col zy-word-popup"
+      style={{ 
+        top: `${safePosition.top}px`, 
+        left: `${safePosition.left}px`,
+        width: '320px',
+        maxHeight: '400px',
+        overflowY: 'auto'
+      }}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="p-3 border-b border-gray-100 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800 flex justify-between items-start z-10">
