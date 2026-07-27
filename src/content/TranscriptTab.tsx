@@ -3,9 +3,51 @@ import { YouTubeTranscriptProvider, TranscriptResult, CaptionTrack } from '../tr
 import { CorrectionDB } from '../transcript/correction-db';
 import { CorrectedBilingualSentence } from '../settings/types';
 import { sendRuntimeMessage } from './runtime-messenger';
+import { WordDictionaryPopup } from './components/WordDictionaryPopup';
 
-const HighlightedText = ({ text, highlight, exact }: { text: string, highlight: string, exact: boolean }) => {
-  if (!highlight.trim()) return <span>{text}</span>;
+const HighlightedText = ({ 
+  text, 
+  highlight, 
+  exact,
+  isEnglish,
+  englishSentence,
+  turkishSentence,
+  timestampMs,
+  correctedSentenceId,
+  onWordClick
+}: { 
+  text: string, 
+  highlight: string, 
+  exact: boolean,
+  isEnglish?: boolean,
+  englishSentence?: string,
+  turkishSentence?: string,
+  timestampMs?: number,
+  correctedSentenceId?: string,
+  onWordClick?: (e: React.MouseEvent<HTMLSpanElement>, word: string, engSent: string, trSent: string, time: number, id?: string) => void
+}) => {
+  const renderClickableWords = (content: string) => {
+    if (!isEnglish || !onWordClick || !englishSentence) return content;
+    const wordParts = content.split(/([a-zA-Z]+(?:[''-][a-zA-Z]+)*)/);
+    return wordParts.map((wp, j) => {
+      if (/^[a-zA-Z]+(?:[''-][a-zA-Z]+)*$/.test(wp)) {
+        return (
+          <span
+            key={j}
+            className="cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/50 hover:underline decoration-blue-300 dark:decoration-blue-700 rounded px-0.5 -mx-0.5 transition-colors inline-block"
+            onClick={(e) => onWordClick(e, wp, englishSentence, turkishSentence || '', timestampMs || 0, correctedSentenceId)}
+          >
+            {wp}
+          </span>
+        );
+      }
+      return <span key={j}>{wp}</span>;
+    });
+  };
+
+  if (!highlight.trim()) {
+    return <span>{renderClickableWords(text)}</span>;
+  }
   
   try {
     const regexPattern = exact 
@@ -22,15 +64,17 @@ const HighlightedText = ({ text, highlight, exact }: { text: string, highlight: 
             : highlight.trim().split(/\s+/).some(w => w.toLowerCase() === part.toLowerCase());
             
           return isMatch ? (
-            <mark key={i} className="bg-yellow-300 text-black px-0.5 rounded font-semibold">{part}</mark>
+            <mark key={i} className="bg-yellow-300 text-black px-0.5 rounded font-semibold">
+              {renderClickableWords(part)}
+            </mark>
           ) : (
-            <span key={i}>{part}</span>
+            <span key={i}>{renderClickableWords(part)}</span>
           );
         })}
       </span>
     );
   } catch (e) {
-    return <span>{text}</span>;
+    return <span>{renderClickableWords(text)}</span>;
   }
 };
 
@@ -62,6 +106,34 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
   const [correctionError, setCorrectionError] = useState<string | null>(null);
   const [pendingCorrection, setPendingCorrection] = useState(false);
   const activeCorrectionTaskIdRef = useRef<string | null>(null);
+
+  const [activePopup, setActivePopup] = useState<{
+    word: string;
+    englishSentence: string;
+    turkishSentence: string;
+    timestampMs: number;
+    correctedSentenceId?: string;
+    position: { top: number; left: number };
+  } | null>(null);
+
+  const handleWordClick = (e: React.MouseEvent<HTMLSpanElement>, word: string, englishSentence: string, turkishSentence: string, timestampMs: number, correctedSentenceId?: string) => {
+    e.stopPropagation();
+    const container = containerRef.current;
+    if (!container) return;
+    const containerRect = container.getBoundingClientRect();
+    
+    setActivePopup({
+      word,
+      englishSentence,
+      turkishSentence,
+      timestampMs,
+      correctedSentenceId,
+      position: { 
+        top: e.clientY - containerRect.top + container.scrollTop + 20, 
+        left: Math.min(e.clientX - containerRect.left, Math.max(0, container.clientWidth - 330))
+      }
+    });
+  };
   
   const providerRef = useRef(new YouTubeTranscriptProvider());
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -135,33 +207,39 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       if (!activeCorrectionTaskIdRef.current || message.taskId !== activeCorrectionTaskIdRef.current) return;
       
       if (message.type === 'CORRECTION_COMPLETED') {
-        setIsCorrecting(false);
-        setCorrectionProgress(null);
+        setCorrectionProgress({ stage: 'saving', message: 'Düzeltilmiş transkript kaydediliyor...', elapsedMs: 0 });
         const enrichedSentences = message.result.sentences;
 
-        setCorrectedSentences(enrichedSentences);
-        setCorrectionMode('both');
-        setCorrectionSuccessMsg(`Düzeltme tamamlandı: ${enrichedSentences.length} anlamlı çift dilli cümle oluşturuldu.`);
-        
-        // Save to DB
         const currentHash = result?.segments.map(s => s.id).join(',');
         const title = document.querySelector('title')?.textContent?.replace('- YouTube', '').trim() || 'Video';
+        const srcLang = result?.segments[0]?.languageCode?.startsWith('tr') ? 'tr' : 'en';
 
         CorrectionDB.set({
           videoId,
           videoTitle: title,
-          sourceLanguage: 'tr',
+          sourceLanguage: srcLang,
           sourceTrackLanguage: result?.segments[0]?.languageCode || 'tr',
           sourceTranscriptHash: currentHash,
           promptVersion: 'bilingual-sentence-v2',
           sentences: enrichedSentences,
           createdAt: Date.now(),
           updatedAt: Date.now()
+        }).then(() => {
+          setIsCorrecting(false);
+          setCorrectionProgress(null);
+          setPendingCorrection(false);
+          activeCorrectionTaskIdRef.current = null;
+          setCorrectedSentences(enrichedSentences);
+          setCorrectionMode('both');
+          setCorrectionSuccessMsg(`Düzeltme tamamlandı: ${enrichedSentences.length} anlamlı çift dilli cümle oluşturuldu.`);
+          setTimeout(() => setCorrectionSuccessMsg(null), 5000);
         }).catch(console.error);
 
       } else if (message.type === 'CORRECTION_FAILED') {
         setIsCorrecting(false);
         setCorrectionProgress(null);
+        setPendingCorrection(false);
+        activeCorrectionTaskIdRef.current = null;
         setCorrectionError(message.error?.userMessage || 'Düzeltme başarısız.');
       } else if (message.type === 'CORRECTION_PROGRESS') {
         setCorrectionProgress({
@@ -474,7 +552,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
         return {
           id: s.id,
           startTimeMs: s.startTimeMs,
-          endTimeMs: s.endTimeMs + s.durationMs, // Use proper end time
+          endTimeMs: s.endTimeMs,
           turkish: trText,
           english: enText
         };
@@ -500,21 +578,25 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
     } catch (e: any) {
       setIsCorrecting(false);
       setCorrectionProgress(null);
+      setPendingCorrection(false);
+      activeCorrectionTaskIdRef.current = null;
       setCorrectionError(e.message || 'Düzeltme başlatılamadı.');
     }
   };
 
   const cancelCorrection = () => {
-    if (activeCorrectionTaskIdRef.current) {
-      chrome.runtime.sendMessage({
-        type: 'CANCEL_CORRECTION',
-        taskId: activeCorrectionTaskIdRef.current,
-        videoId
-      }).catch(console.error);
-    }
+    if (!activeCorrectionTaskIdRef.current) return;
+    
+    chrome.runtime.sendMessage({
+      type: 'CANCEL_CORRECTION',
+      taskId: activeCorrectionTaskIdRef.current,
+      videoId
+    }).catch(console.error);
+    
     setIsCorrecting(false);
     setCorrectionProgress(null);
     setPendingCorrection(false);
+    activeCorrectionTaskIdRef.current = null;
     setCorrectionError('İstek kullanıcı tarafından iptal edildi.');
   };
 
@@ -664,7 +746,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       )}
 
       {(isCorrecting || pendingCorrection) && correctionProgress && (
-        <div className="bg-blue-50 dark:bg-blue-900 border-l-4 border-blue-500 text-blue-800 dark:bg-blue-200 p-3 text-sm shrink-0 shadow-sm rounded-r flex justify-between items-center">
+        <div className="bg-blue-50 dark:bg-blue-900 border-l-4 border-blue-500 text-blue-800 dark:text-blue-200 p-3 text-sm shrink-0 shadow-sm rounded-r flex justify-between items-center">
           <div className="flex flex-col gap-1">
             <div className="flex items-center gap-2">
               <svg className="animate-spin h-4 w-4 text-blue-600 dark:text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -674,12 +756,13 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
               <span className="font-semibold text-blue-900 dark:text-blue-100">Transkript Düzeltiliyor...</span>
             </div>
             <div className="text-xs text-blue-700 dark:text-blue-300 pl-6">
-              {correctionProgress.message}
+              {correctionProgress.message} {correctionProgress.elapsedMs > 0 && `(${Math.floor(correctionProgress.elapsedMs / 60000).toString().padStart(2, '0')}:${Math.floor((correctionProgress.elapsedMs % 60000) / 1000).toString().padStart(2, '0')})`}
             </div>
           </div>
           <button 
             onClick={cancelCorrection}
-            className="px-3 py-1.5 bg-white dark:bg-blue-800 text-blue-600 dark:text-blue-200 rounded border border-blue-200 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-700 font-semibold transition-colors shadow-sm text-xs"
+            disabled={!activeCorrectionTaskIdRef.current}
+            className="px-3 py-1.5 bg-white dark:bg-blue-800 text-blue-600 dark:text-blue-200 rounded border border-blue-200 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-700 font-semibold transition-colors shadow-sm text-xs disabled:opacity-50"
           >
             İptal
           </button>
@@ -732,6 +815,10 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
                displaySecondaryText = displaySecondaryText.substring(timeString.length).trim();
             }
             
+            const isTurkishSource = result?.segments[0]?.languageCode?.startsWith('tr');
+            const trText = isTurkishSource ? displayText : displaySecondaryText;
+            const enText = isTurkishSource ? displaySecondaryText : displayText;
+            
             return (
               <div 
                 key={seg.id} 
@@ -750,10 +837,28 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
                   </button>
                 )}
                 <div className={`flex-1 ${isActive ? 'font-medium text-black dark:text-white' : ''}`}>
-                  <HighlightedText text={displayText} highlight={searchQuery} exact={exactMatch} />
+                  <HighlightedText 
+                    text={displayText} 
+                    highlight={searchQuery} 
+                    exact={exactMatch} 
+                    isEnglish={!isTurkishSource}
+                    englishSentence={enText}
+                    turkishSentence={trText}
+                    timestampMs={seg.startTimeMs}
+                    onWordClick={handleWordClick}
+                  />
                   {displaySecondaryText && (
                     <div className={`mt-1 ${isActive ? 'text-yellow-600 dark:text-yellow-300' : 'text-yellow-600 dark:text-yellow-400'}`}>
-                      <HighlightedText text={displaySecondaryText} highlight={searchQuery} exact={exactMatch} />
+                      <HighlightedText 
+                        text={displaySecondaryText} 
+                        highlight={searchQuery} 
+                        exact={exactMatch} 
+                        isEnglish={isTurkishSource}
+                        englishSentence={enText}
+                        turkishSentence={trText}
+                        timestampMs={seg.startTimeMs}
+                        onWordClick={handleWordClick}
+                      />
                     </div>
                   )}
                 </div>
@@ -793,7 +898,16 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
                       </div>
                       {seg.originalEnglish && (
                         <div className="text-yellow-600/70 dark:text-yellow-400/70 mt-1">
-                          <HighlightedText text={seg.originalEnglish} highlight={searchQuery} exact={exactMatch} />
+                          <HighlightedText 
+                            text={seg.originalEnglish} 
+                            highlight={searchQuery} 
+                            exact={exactMatch} 
+                            isEnglish={true}
+                            englishSentence={seg.originalEnglish}
+                            turkishSentence={seg.originalTurkish}
+                            timestampMs={seg.startTimeMs}
+                            onWordClick={handleWordClick}
+                          />
                         </div>
                       )}
                     </div>
@@ -804,7 +918,17 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
                   </div>
                   {seg.correctedEnglish && (
                     <div className="text-amber-700 dark:text-amber-400 mt-1">
-                      <HighlightedText text={seg.correctedEnglish} highlight={searchQuery} exact={exactMatch} />
+                      <HighlightedText 
+                        text={seg.correctedEnglish} 
+                        highlight={searchQuery} 
+                        exact={exactMatch} 
+                        isEnglish={true}
+                        englishSentence={seg.correctedEnglish}
+                        turkishSentence={seg.correctedTurkish}
+                        timestampMs={seg.startTimeMs}
+                        correctedSentenceId={seg.id}
+                        onWordClick={handleWordClick}
+                      />
                     </div>
                   )}
                 </div>
@@ -818,6 +942,15 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
           </div>
         )}
       </div>
+
+      {activePopup && (
+        <WordDictionaryPopup
+          {...activePopup}
+          videoId={videoId}
+          videoTitle={document.querySelector('title')?.textContent?.replace('- YouTube', '').trim() || 'Video'}
+          onClose={() => setActivePopup(null)}
+        />
+      )}
     </div>
   );
 };
