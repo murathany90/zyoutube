@@ -28,9 +28,9 @@ const HighlightedText = ({
 }) => {
   const renderClickableWords = (content: string) => {
     if (!isEnglish || !onWordClick || !englishSentence) return content;
-    const wordParts = content.split(/([a-zA-Z]+(?:[''-][a-zA-Z]+)*)/);
+    const wordParts = content.split(/([a-zA-Z]+(?:['’'-][a-zA-Z]+)*)/);
     return wordParts.map((wp, j) => {
-      if (/^[a-zA-Z]+(?:[''-][a-zA-Z]+)*$/.test(wp)) {
+      if (/^[a-zA-Z]+(?:['’'-][a-zA-Z]+)*$/.test(wp)) {
         return (
           <span
             key={j}

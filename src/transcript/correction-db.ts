@@ -58,9 +58,30 @@ export class CorrectionDB {
         };
         getRequest.onerror = () => resolve(null);
       });
-    } catch (e) {
-      console.warn('CorrectionDB read error', e);
+    } catch (error) {
+      console.error('CorrectionDB get error', error);
       return null;
+    }
+  }
+
+  static async getAll(): Promise<CorrectedTranscriptRecord[]> {
+    try {
+      const db = await this.getDB();
+      return new Promise((resolve) => {
+        const transaction = db.transaction(this.STORE_NAME, 'readonly');
+        const store = transaction.objectStore(this.STORE_NAME);
+        const getRequest = store.getAll();
+
+        getRequest.onsuccess = () => {
+          let results = getRequest.result as CorrectedTranscriptRecord[] || [];
+          results.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+          resolve(results);
+        };
+        getRequest.onerror = () => resolve([]);
+      });
+    } catch (error) {
+      console.error('CorrectionDB getAll error', error);
+      return [];
     }
   }
 

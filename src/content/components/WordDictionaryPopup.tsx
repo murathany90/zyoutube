@@ -52,6 +52,9 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
     const loadData = async () => {
       setLoading(true);
       setError(null);
+      setIsSaved(false);
+      setSaveMessage(null);
+      
       try {
         const result = await DictionaryService.lookupWord(word, englishSentence, abortController.signal);
         if (!abortController.signal.aborted) {
@@ -70,7 +73,7 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
 
     const checkSaved = async () => {
       const saved = await DictionaryDB.getStudyWord(studyWordId);
-      if (saved) setIsSaved(true);
+      setIsSaved(Boolean(saved));
     };
 
     loadData();
@@ -99,8 +102,36 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
     };
   }, [onClose]);
 
+  useEffect(() => {
+    if (popupRef.current) {
+      const rect = popupRef.current.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      
+      let newLeft = left;
+      let newTop = top;
+      let changed = false;
+
+      if (rect.right > viewportWidth) {
+        newLeft = Math.max(10, viewportWidth - rect.width - 10);
+        changed = true;
+      }
+      
+      if (rect.bottom > viewportHeight) {
+        newTop = Math.max(10, viewportHeight - rect.height - 10);
+        changed = true;
+      }
+      
+      if (changed) {
+        popupRef.current.style.left = `${newLeft}px`;
+        popupRef.current.style.top = `${newTop}px`;
+      }
+    }
+  }, [position, data]);
+
   const toggleSave = async () => {
     if (!data) return;
+    setError(null);
     try {
       if (isSaved) {
         await DictionaryDB.removeStudyWord(studyWordId);
@@ -131,8 +162,8 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
         setSaveMessage('Kelime çalışılacak kelimelere eklendi.');
         setTimeout(() => setSaveMessage(null), 3000);
       }
-    } catch (e) {
-      console.error('Failed to toggle save study word', e);
+    } catch (e: any) {
+      setError(e.message || 'Kelime kaydedilemedi.');
     }
   };
 

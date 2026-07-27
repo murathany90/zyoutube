@@ -33,10 +33,10 @@ export class DictionaryService {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(new Error('Timeout')), this.TIMEOUT_MS);
     
+    let abortListener: (() => void) | null = null;
     if (externalSignal) {
-      externalSignal.addEventListener('abort', () => {
-        controller.abort(externalSignal.reason);
-      });
+      abortListener = () => controller.abort(externalSignal.reason);
+      externalSignal.addEventListener('abort', abortListener);
     }
 
     const encodedWord = encodeURIComponent(word);
@@ -89,10 +89,22 @@ export class DictionaryService {
       // Deduplicate and limit
       result.synonyms = Array.from(new Set(result.synonyms.map(s => s.toLowerCase()))).slice(0, 8);
       result.antonyms = Array.from(new Set(result.antonyms.map(a => a.toLowerCase()))).slice(0, 8);
-      result.meaningsTr = Array.from(new Set(result.meaningsTr.map(m => m.toLowerCase())));
+      result.meaningsTr = Array.from(new Set(result.meaningsTr.map(m => m.toLowerCase()))).slice(0, 5);
+      
+      if (
+        result.meaningsTr.length === 0 &&
+        result.definitionsEn.length === 0 &&
+        result.synonyms.length === 0 &&
+        result.antonyms.length === 0
+      ) {
+        throw new Error('DICTIONARY_RESULT_EMPTY');
+      }
 
     } finally {
       clearTimeout(timeoutId);
+      if (externalSignal && abortListener) {
+        externalSignal.removeEventListener('abort', abortListener);
+      }
     }
 
     return result;
@@ -150,6 +162,16 @@ export class DictionaryService {
     return data.map((d: any) => d.word);
   }
 
+  private static cleanHtmlEntities(str: string): string {
+    return str.replace(/&#([0-9]{1,3});/gi, (_, numStr) => {
+      return String.fromCharCode(parseInt(numStr, 10));
+    }).replace(/&quot;/g, '"')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&#39;/g, "'");
+  }
+
   private static async fetchMyMemory(word: string, signal: AbortSignal) {
     const res = await fetch(`https://api.mymemory.translated.net/get?q=${word}&langpair=en|tr`, { signal });
     if (!res.ok) return null;
@@ -158,16 +180,16 @@ export class DictionaryService {
     
     const translations = [];
     if (data.responseData.translatedText && !data.responseData.translatedText.includes('NO QUERY SPECIFIED')) {
-        translations.push(data.responseData.translatedText);
+        translations.push(this.cleanHtmlEntities(data.responseData.translatedText));
     }
     
     if (data.matches) {
        for (const m of data.matches) {
          if (m.translation && m.translation !== data.responseData.translatedText && !m.translation.includes('NO QUERY SPECIFIED')) {
-             translations.push(m.translation);
+             translations.push(this.cleanHtmlEntities(m.translation));
          }
        }
     }
-    return translations.slice(0, 3);
+    return translations.slice(0, 5);
   }
 }

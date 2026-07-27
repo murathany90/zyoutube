@@ -131,4 +131,52 @@ export class DictionaryDB {
       request.onerror = () => reject(request.error);
     });
   }
+
+  static async getAllStudyWords(): Promise<StudyWord[]> {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction('studyWords', 'readonly');
+      const store = tx.objectStore('studyWords');
+      const request = store.getAll();
+      request.onsuccess = () => {
+        const results = request.result as StudyWord[];
+        results.sort((a, b) => b.updatedAt - a.updatedAt);
+        resolve(results);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  static async getStudyWordsByVideo(videoId: string): Promise<StudyWord[]> {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction('studyWords', 'readonly');
+      const store = tx.objectStore('studyWords');
+      // We don't have an index on videoId right now, so we filter getAll
+      const request = store.getAll();
+      request.onsuccess = () => {
+        let results = request.result as StudyWord[];
+        results = results.filter(w => w.videoId === videoId);
+        results.sort((a, b) => b.updatedAt - a.updatedAt);
+        resolve(results);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  static async getStudyWordsByWord(normalizedWord: string): Promise<StudyWord[]> {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction('studyWords', 'readonly');
+      const store = tx.objectStore('studyWords');
+      const request = store.getAll();
+      request.onsuccess = () => {
+        let results = request.result as StudyWord[];
+        results = results.filter(w => w.normalizedWord === normalizedWord);
+        results.sort((a, b) => b.updatedAt - a.updatedAt);
+        resolve(results);
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
 }
