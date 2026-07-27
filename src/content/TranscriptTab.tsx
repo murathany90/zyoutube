@@ -112,7 +112,17 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
   const [correctionSuccessMsg, setCorrectionSuccessMsg] = useState<string | null>(null);
   const [correctionError, setCorrectionError] = useState<string | null>(null);
   const [pendingCorrection, setPendingCorrection] = useState(false);
+  const [, setIsCancelling] = useState(false);
   const activeCorrectionTaskIdRef = useRef<string | null>(null);
+
+  const finishCorrectionWithError = (message: string) => {
+    setIsCorrecting(false);
+    setPendingCorrection(false);
+    setCorrectionError(message);
+    setCorrectionProgress(null);
+    setIsCancelling(false);
+    activeCorrectionTaskIdRef.current = null;
+  };
 
   const [activePopup, setActivePopup] = useState<{
     word: string;
@@ -245,8 +255,9 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
           updatedAt: Date.now()
         }).then(() => {
           setIsCorrecting(false);
-          setCorrectionProgress(null);
           setPendingCorrection(false);
+          setCorrectionProgress(null);
+          setIsCancelling(false);
           activeCorrectionTaskIdRef.current = null;
           setCorrectedSentences(enrichedSentences);
           setCorrectionMode('both');
@@ -255,11 +266,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
         }).catch(console.error);
 
       } else if (message.type === 'CORRECTION_FAILED') {
-        setIsCorrecting(false);
-        setCorrectionProgress(null);
-        setPendingCorrection(false);
-        activeCorrectionTaskIdRef.current = null;
-        setCorrectionError(message.error?.userMessage || 'Düzeltme başarısız.');
+        finishCorrectionWithError(message.error?.userMessage || 'Düzeltme başarısız.');
       } else if (message.type === 'CORRECTION_PROGRESS') {
         setCorrectionProgress({
           stage: message.stage,
@@ -467,14 +474,16 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
     });
   }, [correctedSentences, searchQuery, exactMatch]);
 
-  const displayedItemsLength = correctionMode === 'original' ? filteredSegments.length : filteredSentences.length;
+  const effectiveCorrectionMode = correctedSentences && correctedSentences.length > 0 ? correctionMode : 'original';
+
+  const displayedItemsLength = effectiveCorrectionMode === 'original' ? filteredSegments.length : filteredSentences.length;
 
   // Find EXACT active segment to avoid double lines
   const activeSegmentId = useMemo(() => {
     if (searchQuery) return null; // don't highlight during search
     let activeId = null;
     
-    if (correctionMode === 'original') {
+    if (effectiveCorrectionMode === 'original') {
       for (let i = 0; i < filteredSegments.length; i++) {
         if (filteredSegments[i].startTimeMs <= currentTime) {
           activeId = filteredSegments[i].id;
@@ -500,7 +509,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
   // 4. Auto-sync scroll
   useEffect(() => {
     let activeIndex = -1;
-    if (correctionMode === 'original') {
+    if (effectiveCorrectionMode === 'original') {
       activeIndex = filteredSegments.findIndex(s => s.id === activeSegmentId);
     } else {
       activeIndex = filteredSentences.findIndex(s => s.id === activeSegmentId);
@@ -556,7 +565,6 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       setCorrectionProgress({ stage: 'preparing', message: 'Türkçe ve İngilizce transkript hazırlanıyor...', elapsedMs: 0 });
       
       const taskId = `correction_${Date.now()}`;
-      setCorrectionMode('both');
       activeCorrectionTaskIdRef.current = taskId;
 
       const title = document.querySelector('title')?.textContent?.replace('- YouTube', '').trim() || 'Video';
@@ -592,28 +600,21 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
         throw new Error(res?.error || 'Düzeltme başlatılamadı.');
       }
     } catch (e: any) {
-      setIsCorrecting(false);
-      setCorrectionProgress(null);
-      setPendingCorrection(false);
-      activeCorrectionTaskIdRef.current = null;
-      setCorrectionError(e.message || 'Düzeltme başlatılamadı.');
+      finishCorrectionWithError(e.message || 'Düzeltme başlatılamadı.');
     }
   };
 
   const cancelCorrection = () => {
     if (!activeCorrectionTaskIdRef.current) return;
     
+    setIsCancelling(true);
     chrome.runtime.sendMessage({
       type: 'CANCEL_CORRECTION',
       taskId: activeCorrectionTaskIdRef.current,
       videoId
     }).catch(console.error);
     
-    setIsCorrecting(false);
-    setCorrectionProgress(null);
-    setPendingCorrection(false);
-    activeCorrectionTaskIdRef.current = null;
-    setCorrectionError('İstek kullanıcı tarafından iptal edildi.');
+    finishCorrectionWithError('İstek kullanıcı tarafından iptal edildi.');
   };
 
   const startCorrection = async () => {
@@ -642,8 +643,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
             setPendingCorrection(false);
             executeCorrection(result.segments, result.segments[0].languageCode);
          } else if (error || dualLangWarning) {
-            setPendingCorrection(false);
-            setCorrectionError('İkinci dil alınamadığı için API çağrısı iptal edildi.');
+            finishCorrectionWithError('İkinci dil alınamadığı için API çağrısı iptal edildi.');
          }
      }
   }, [pendingCorrection, result, loading, error, dualLangWarning]);

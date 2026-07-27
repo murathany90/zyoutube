@@ -407,12 +407,18 @@ const Popup = () => {
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Düzeltme çıktı token limiti</label>
                   <input type="number" style={inputStyle}
-                    value={draftProvider?.correctionMaxTokens ?? 32000}
+                    value={draftProvider?.correctionMaxTokens ?? 130000}
                     onChange={e => {
                       const val = parseInt(e.target.value);
-                      updateProviderDraft({ correctionMaxTokens: isNaN(val) ? 32000 : val });
+                      if (isNaN(val)) {
+                        updateProviderDraft({ correctionMaxTokens: 130000 });
+                      } else {
+                        updateProviderDraft({ correctionMaxTokens: Math.min(1000000, Math.max(1000, val)) });
+                      }
                     }}
-                    placeholder="32000"
+                    min={1000}
+                    max={1000000}
+                    placeholder="130000"
                   />
                 </div>
               </div>

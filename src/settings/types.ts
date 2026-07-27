@@ -69,7 +69,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
       responseMode: 'markdown',
       enableReasoning: false,
       correctionJsonMode: true,
-      correctionMaxTokens: 32000,
+      correctionMaxTokens: 130000,
       correctionStreaming: true,
       correctionEnableReasoning: false
     },

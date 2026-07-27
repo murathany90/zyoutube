@@ -52,7 +52,7 @@ ${JSON.stringify({ sourceLanguage: request.transcript.sourceLanguage, segments: 
         { role: 'user', content: userPrompt }
       ],
       temperature: config.temperature ?? 0.3,
-      max_tokens: config.correctionMaxTokens ?? Math.max(config.maxTokens ?? 4000, 32000),
+      max_tokens: config.correctionMaxTokens ?? 130000,
     };
     
     if (config.correctionEnableReasoning === true) {

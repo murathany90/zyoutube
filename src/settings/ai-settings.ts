@@ -37,13 +37,22 @@ export class AISettingsService {
         }
       }
 
+      let needsMigrationSave = false;
+
       // Deep merge providers
       if (savedSettings.providers) {
         for (const [key, value] of Object.entries(savedSettings.providers)) {
           if (key === 'gemini-api') continue; // Eski Gemini API provider'ı atla
           
-          if (key === 'openai-compatible' && value.timeoutMs === 30000) {
-            value.timeoutMs = 180000;
+          if (key === 'openai-compatible') {
+            if (value.timeoutMs === 30000) {
+              value.timeoutMs = 180000;
+              needsMigrationSave = true;
+            }
+            if (value.correctionMaxTokens === 32000 || value.correctionMaxTokens === undefined) {
+              value.correctionMaxTokens = 130000;
+              needsMigrationSave = true;
+            }
           }
 
           merged.providers[key] = {
@@ -51,6 +60,11 @@ export class AISettingsService {
             ...value
           };
         }
+      }
+
+      if (needsMigrationSave) {
+        // Save silently in the background
+        chrome.storage.local.set({ [this.STORAGE_KEY]: merged }).catch(console.error);
       }
 
       // Restore session keys
