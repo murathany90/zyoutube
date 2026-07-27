@@ -1,5 +1,7 @@
 import { PromptBuilder } from '../ai/prompt-builder';
 import { ResponseParser } from '../ai/response-parser';
+import { CorrectionPromptBuilder } from '../ai/prompt-correction';
+import { CorrectionResponseParser } from '../ai/correction-parser';
 
 interface TaskContext {
   controller: AbortController;
@@ -40,6 +42,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (task) {
       task.controller.abort(new Error('AbortError'));
       // Clean up happens in the finally block of handleApiSummaryStart
+    }
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'API_CORRECTION_START') {
+    if (activeTasks.has(message.taskId)) {
+      sendResponse({ success: false, error: 'API_TASK_ALREADY_RUNNING' });
+      return true;
+    }
+    handleApiCorrectionStart(message.taskId, message.videoId, message.request, message.config);
+    sendResponse({ success: true, accepted: true });
+    return true;
+  }
+  
+  if (message.type === 'API_CORRECTION_CANCEL') {
+    const task = activeTasks.get(message.taskId);
+    if (task) {
+      task.controller.abort(new Error('AbortError'));
     }
     sendResponse({ success: true });
     return true;
@@ -224,3 +245,132 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
     resetIdleTimer();
   }
 }
+
+async function handleApiCorrectionStart(taskId: string, videoId: string, request: any, config: any) {
+  const startedAt = performance.now();
+  const controller = new AbortController();
+  
+  const heartbeatId = window.setInterval(() => {
+    chrome.runtime.sendMessage({
+      type: 'API_CORRECTION_HEARTBEAT',
+      taskId,
+      videoId
+    }).catch(console.error);
+  }, 15000);
+
+  const timeoutMs = config.timeoutMs ?? 180000;
+  const timeoutId = window.setTimeout(() => {
+    controller.abort(new Error('Timeout'));
+  }, timeoutMs);
+
+  activeTasks.set(taskId, {
+    controller,
+    heartbeatId,
+    timeoutId,
+    startedAt
+  });
+  
+  chrome.runtime.sendMessage({ type: 'API_CORRECTION_ACCEPTED', taskId }).catch(console.error);
+  resetIdleTimer();
+
+  try {
+    console.log(`[API Task] offscreen correction started for task ${taskId}`);
+    
+    let urlStr = config.baseUrl;
+    while (urlStr.endsWith('/')) urlStr = urlStr.slice(0, -1);
+    const url = urlStr.endsWith('/chat/completions') ? urlStr : `${urlStr}/chat/completions`;
+
+    const body = CorrectionPromptBuilder.buildApiRequestBody(request, config);
+
+    console.log(`[API Task] correction POST started`);
+    const fetchStart = performance.now();
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${config.apiKey}`,
+        ...config.customHeaders
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    
+    const latencyMs = Math.round(performance.now() - fetchStart);
+    console.log(`[API Task] correction HTTP status: ${response.status}`);
+
+    if (!response.ok) {
+      let errorMsg = response.statusText;
+      try {
+        const rawText = await response.text();
+        const errorData = JSON.parse(rawText);
+        errorMsg = errorData?.error?.message || errorData?.message || rawText.slice(0, 500);
+      } catch { /* ignore */ }
+      throw new Error(`Bağlantı hatası: ${response.status} ${errorMsg}`);
+    }
+
+    let aiResponseText = '';
+    const data = await response.json();
+    if (!data.choices || !data.choices[0]) {
+       throw new Error("Geçersiz API yanıtı (choices dizisi boş).");
+    }
+    const messageObj = data.choices[0].message;
+    if (!messageObj) {
+       throw new Error("Geçersiz API yanıtı (message nesnesi eksik).");
+    }
+    
+    aiResponseText = messageObj.content || messageObj.reasoning_content || '';
+    if (!aiResponseText || aiResponseText.trim() === '') {
+      throw new Error("EMPTY_API_RESPONSE: API yanıtı içerik barındırmıyor.");
+    }
+    if (data.choices[0].finish_reason === 'content_filter') {
+       throw new Error("İçerik filtrelemesi nedeniyle yanıt alınamadı.");
+    }
+
+    const sentences = CorrectionResponseParser.parse(aiResponseText);
+    
+    const finalResult = {
+      sentences,
+      latencyMs,
+      timestamp: Date.now()
+    };
+    
+    console.log(`[API Task] correction completed`);
+    
+    chrome.runtime.sendMessage({
+        type: 'API_CORRECTION_COMPLETED',
+        taskId,
+        videoId,
+        result: finalResult
+    }).catch(e => {
+        console.error(`[API Task] correction delivery failed:`, e);
+    });
+    
+  } catch (e: any) {
+    console.log(`[API Task] correction failed:`, e);
+    const isTimeout = e.message === 'Timeout';
+    const isAbort = e.name === 'AbortError' || e.message === 'AbortError';
+    
+    const errorCode = isAbort ? 'REQUEST_CANCELLED' : (isTimeout ? 'TIMEOUT' : 'UNKNOWN_ERROR');
+    const userMsg = isAbort ? 'İstek iptal edildi.' : (isTimeout ? 'İstek zaman aşımına uğradı.' : (e.message || 'Beklenmeyen hata.'));
+    
+    chrome.runtime.sendMessage({
+        type: 'API_CORRECTION_FAILED',
+        taskId,
+        videoId,
+        error: {
+            code: errorCode,
+            userMessage: userMsg,
+            retryable: !isAbort
+        }
+    }).catch(err => console.error(err));
+  } finally {
+    const task = activeTasks.get(taskId);
+    if (task) {
+      window.clearTimeout(task.timeoutId);
+      window.clearInterval(task.heartbeatId);
+      activeTasks.delete(taskId);
+    }
+    resetIdleTimer();
+  }
+}
+

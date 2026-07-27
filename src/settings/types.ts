@@ -3,6 +3,23 @@ import { SummaryEngine } from '../gem/types';
 // Eski API provider'ları için
 export type AIProviderId = 'openai-compatible' | 'chrome-local';
 
+export interface CorrectedBilingualSentence {
+  id: string;
+  startTimeMs: number;
+  endTimeMs: number;
+  sourceSegmentIds: string[];
+
+  originalTurkish: string;
+  originalEnglish: string;
+
+  correctedTurkish: string;
+  correctedEnglish: string;
+
+  sourceLanguage: "tr" | "en";
+  confidence?: number;
+}
+
+
 export interface AIProviderConfig {
   id: AIProviderId;
   apiKey?: string;

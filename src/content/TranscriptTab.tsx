@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { YouTubeTranscriptProvider, TranscriptResult, CaptionTrack } from '../transcript';
+import { CorrectionDB } from '../transcript/correction-db';
+import { CorrectedBilingualSentence } from '../settings/types';
+import { sendRuntimeMessage } from './runtime-messenger';
 
 const HighlightedText = ({ text, highlight, exact }: { text: string, highlight: string, exact: boolean }) => {
   if (!highlight.trim()) return <span>{text}</span>;
@@ -50,6 +53,12 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [showTimestamps, setShowTimestamps] = useState(true);
   const [reloadCounter, setReloadCounter] = useState(0);
+
+  const [correctionMode, setCorrectionMode] = useState<'original' | 'corrected' | 'both'>('original');
+  const [correctedSentences, setCorrectedSentences] = useState<CorrectedBilingualSentence[] | null>(null);
+  const [isCorrecting, setIsCorrecting] = useState(false);
+  const [correctionError, setCorrectionError] = useState<string | null>(null);
+  const activeCorrectionTaskIdRef = useRef<string | null>(null);
   
   const providerRef = useRef(new YouTubeTranscriptProvider());
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -85,9 +94,60 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       }
     };
 
+    const loadCorrection = async () => {
+      const record = await CorrectionDB.get(videoId);
+      if (active) {
+        if (record) {
+          setCorrectedSentences(record.sentences);
+        } else {
+          setCorrectedSentences(null);
+        }
+        setCorrectionMode('original'); // reset mode
+      }
+    };
+
     initTracks();
+    loadCorrection();
     
     return () => { active = false; };
+  }, [videoId]);
+
+  // Listener for Correction API
+  useEffect(() => {
+    const listener = (message: any) => {
+      if (!activeCorrectionTaskIdRef.current || message.taskId !== activeCorrectionTaskIdRef.current) return;
+      
+      if (message.type === 'CORRECTION_COMPLETED') {
+        setIsCorrecting(false);
+        const enrichedSentences = message.result.sentences.map((sentence: CorrectedBilingualSentence) => {
+          const matchingSegments = result?.segments.filter(s => sentence.sourceSegmentIds.includes(s.id)) || [];
+          if (matchingSegments.length > 0) {
+            sentence.startTimeMs = matchingSegments[0].startTimeMs;
+            sentence.endTimeMs = matchingSegments[matchingSegments.length - 1].startTimeMs + matchingSegments[matchingSegments.length - 1].durationMs;
+            sentence.originalTurkish = matchingSegments.map(s => s.cleanText).join(' ');
+            sentence.originalEnglish = matchingSegments.map(s => s.secondaryText || '').join(' ');
+          }
+          return sentence;
+        });
+
+        setCorrectedSentences(enrichedSentences);
+        setCorrectionMode('both');
+        
+        // Save to DB
+        CorrectionDB.set({
+          videoId,
+          sourceLanguage: 'tr', // default for now
+          sentences: enrichedSentences,
+          createdAt: Date.now()
+        }).catch(console.error);
+
+      } else if (message.type === 'CORRECTION_FAILED') {
+        setIsCorrecting(false);
+        setCorrectionError(message.error?.userMessage || 'Düzeltme başarısız.');
+      }
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
   }, [videoId]);
 
   // 2. Fetch transcript when selectedTrackUrl or language changes
@@ -240,7 +300,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
     }
   };
 
-  // Search filtering
+  // Search filtering for original segments
   const filteredSegments = useMemo(() => {
     if (!result) return [];
     if (!searchQuery.trim()) return result.segments;
@@ -256,26 +316,69 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
     });
   }, [result, searchQuery, exactMatch]);
   
+  // Search filtering for corrected sentences
+  const filteredSentences = useMemo(() => {
+    if (!correctedSentences) return [];
+    if (!searchQuery.trim()) return correctedSentences;
+    
+    const query = searchQuery.toLowerCase().trim();
+    return correctedSentences.filter(seg => {
+      if (exactMatch) {
+        return (seg.correctedTurkish && seg.correctedTurkish.toLowerCase().includes(query)) || 
+               (seg.correctedEnglish && seg.correctedEnglish.toLowerCase().includes(query)) ||
+               (seg.originalTurkish && seg.originalTurkish.toLowerCase().includes(query)) ||
+               (seg.originalEnglish && seg.originalEnglish.toLowerCase().includes(query));
+      } else {
+        const words = query.split(/\s+/);
+        return words.every(w => 
+          (seg.correctedTurkish && seg.correctedTurkish.toLowerCase().includes(w)) || 
+          (seg.correctedEnglish && seg.correctedEnglish.toLowerCase().includes(w)) ||
+          (seg.originalTurkish && seg.originalTurkish.toLowerCase().includes(w)) ||
+          (seg.originalEnglish && seg.originalEnglish.toLowerCase().includes(w))
+        );
+      }
+    });
+  }, [correctedSentences, searchQuery, exactMatch]);
+
+  const displayedItemsLength = correctionMode === 'original' ? filteredSegments.length : filteredSentences.length;
+
   // Find EXACT active segment to avoid double lines
   const activeSegmentId = useMemo(() => {
     if (searchQuery) return null; // don't highlight during search
     let activeId = null;
-    for (let i = 0; i < filteredSegments.length; i++) {
-      if (filteredSegments[i].startTimeMs <= currentTime) {
-        activeId = filteredSegments[i].id;
-      } else {
-        break;
+    
+    if (correctionMode === 'original') {
+      for (let i = 0; i < filteredSegments.length; i++) {
+        if (filteredSegments[i].startTimeMs <= currentTime) {
+          activeId = filteredSegments[i].id;
+        } else {
+          break;
+        }
+      }
+    } else {
+      for (let i = 0; i < filteredSentences.length; i++) {
+        if (filteredSentences[i].startTimeMs <= currentTime) {
+          activeId = filteredSentences[i].id;
+        } else {
+          break;
+        }
       }
     }
     return activeId;
-  }, [filteredSegments, currentTime, searchQuery]);
+  }, [filteredSegments, filteredSentences, currentTime, searchQuery, correctionMode]);
 
   // Virtual/paginated rendering
   const [visibleCount, setVisibleCount] = useState(150);
 
   // 4. Auto-sync scroll
   useEffect(() => {
-    const activeIndex = filteredSegments.findIndex(s => s.id === activeSegmentId);
+    let activeIndex = -1;
+    if (correctionMode === 'original') {
+      activeIndex = filteredSegments.findIndex(s => s.id === activeSegmentId);
+    } else {
+      activeIndex = filteredSentences.findIndex(s => s.id === activeSegmentId);
+    }
+    
     if (
       autoSync &&
       !searchQuery &&
@@ -286,7 +389,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       );
       return;
     }
-  }, [autoSync, searchQuery, activeSegmentId, filteredSegments, visibleCount]);
+  }, [autoSync, searchQuery, activeSegmentId, filteredSegments, filteredSentences, visibleCount, correctionMode]);
 
   useEffect(() => {
     if (!autoSync || searchQuery || !result) return;
@@ -306,7 +409,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.target as HTMLDivElement;
     if (target.scrollHeight - target.scrollTop <= target.clientHeight + 100) {
-      setVisibleCount(prev => Math.min(prev + 50, filteredSegments.length));
+      setVisibleCount(prev => Math.min(prev + 50, displayedItemsLength));
     }
   };
 
@@ -326,27 +429,86 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
   );
   if (!result) return null;
 
+  const startCorrection = async () => {
+    try {
+      setIsCorrecting(true);
+      setCorrectionError(null);
+      
+      const taskId = `correction_${Date.now()}`;
+      setCorrectionMode('both');
+      activeCorrectionTaskIdRef.current = taskId;
+
+      // Extract video title from document or assume empty
+      const title = document.querySelector('title')?.textContent?.replace('- YouTube', '').trim() || 'Video';
+      
+      const request = {
+        taskId,
+        video: { videoId, title },
+        transcript: {
+          languageCode: displayLanguage === 'both' ? 'tr-en' : displayLanguage,
+          segments: result.segments
+        }
+      };
+
+      const res = await sendRuntimeMessage({
+        type: 'START_CORRECTION',
+        request
+      });
+      
+      if (!res?.success) {
+        throw new Error(res?.error || 'Düzeltme başlatılamadı.');
+      }
+    } catch (e: any) {
+      setIsCorrecting(false);
+      setCorrectionError(e.message || 'Düzeltme başlatılamadı.');
+    }
+  };
+
   return (
     <div className="flex flex-col gap-2 text-sm h-full overflow-hidden">
       <div className="flex flex-col gap-2 bg-gray-200 dark:bg-gray-700 p-2 rounded shrink-0">
         <div className="flex justify-between items-center">
-          <select 
-            className="text-xs p-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-black dark:text-white"
-            value={selectedTrackUrl}
-            onChange={(e) => setSelectedTrackUrl(e.target.value)}
-          >
-            {tracks.map(t => (
-              <option key={t.baseUrl} value={t.baseUrl}>
-                {t.name.simpleText} ({t.sourceType === 'automatic' ? 'Otomatik' : t.sourceType === 'manual' ? 'Manuel' : t.sourceType})
-              </option>
-            ))}
-          </select>
-          <div className="text-xs text-black dark:text-white">
-            <span className="font-semibold">Kalite: </span>
-            <span className={result.quality?.level === 'high' ? 'text-green-600 dark:text-green-400' : result.quality?.level === 'medium' ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'}>
-              {result.quality?.level === 'high' ? 'Yüksek' : result.quality?.level === 'medium' ? 'Orta' : 'Düşük'}
-            </span>
-            <span className="ml-1 text-gray-500">({result.quality?.internalScore}/100)</span>
+          <div className="flex gap-2 items-center">
+            <select 
+              className="text-xs p-1 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-black dark:text-white"
+              value={selectedTrackUrl}
+              onChange={(e) => setSelectedTrackUrl(e.target.value)}
+            >
+              {tracks.map(t => (
+                <option key={t.baseUrl} value={t.baseUrl}>
+                  {t.name.simpleText} ({t.sourceType === 'automatic' ? 'Otomatik' : t.sourceType === 'manual' ? 'Manuel' : t.sourceType})
+                </option>
+              ))}
+            </select>
+            {correctedSentences && (
+              <select
+                className="text-xs p-1 rounded border border-blue-300 dark:border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200"
+                value={correctionMode}
+                onChange={e => setCorrectionMode(e.target.value as any)}
+              >
+                <option value="original">Orijinal</option>
+                <option value="corrected">Düzeltilmiş</option>
+                <option value="both">Orijinal + Düzeltilmiş</option>
+              </select>
+            )}
+          </div>
+          <div className="text-xs text-black dark:text-white flex gap-2 items-center">
+            {!correctedSentences && (
+              <button 
+                onClick={startCorrection}
+                disabled={isCorrecting}
+                className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+              >
+                {isCorrecting ? '⏳ Düzeltiliyor...' : '✨ Düzelt'}
+              </button>
+            )}
+            <div className="flex items-center">
+              <span className="font-semibold">Kalite: </span>
+              <span className={result.quality?.level === 'high' ? 'text-green-600 dark:text-green-400 ml-1' : result.quality?.level === 'medium' ? 'text-yellow-600 dark:text-yellow-400 ml-1' : 'text-red-600 dark:text-red-400 ml-1'}>
+                {result.quality?.level === 'high' ? 'Yüksek' : result.quality?.level === 'medium' ? 'Orta' : 'Düşük'}
+              </span>
+              <span className="ml-1 text-gray-500">({result.quality?.internalScore}/100)</span>
+            </div>
           </div>
         </div>
         
@@ -408,6 +570,13 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
         </div>
       )}
 
+      {correctionError && (
+        <div className="text-red-600 dark:text-red-400 text-xs p-2 bg-red-50 dark:bg-red-900/20 rounded shrink-0 flex justify-between items-center">
+          <span>⚠️ {correctionError}</span>
+          <button onClick={() => setCorrectionError(null)} className="underline font-semibold ml-2 text-red-700 dark:text-red-300">Kapat</button>
+        </div>
+      )}
+
       {dualLangWarning && (
         <div className="text-amber-600 dark:text-amber-400 text-xs p-2 bg-amber-50 dark:bg-amber-900/20 rounded shrink-0 flex justify-between items-center">
           <span>⚠️ {dualLangWarning}</span>
@@ -417,7 +586,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
 
       {searchQuery && (
         <div className="text-xs text-gray-500 px-1 shrink-0">
-          {filteredSegments.length} sonuç bulundu.
+          {displayedItemsLength} sonuç bulundu.
         </div>
       )}
 
@@ -428,53 +597,106 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       >
         {loading && <div className="absolute inset-0 bg-white/50 dark:bg-black/50 z-10 flex items-center justify-center">Yükleniyor...</div>}
         
-        {filteredSegments.slice(0, visibleCount).map(seg => {
-          const minutes = Math.floor(seg.startTimeMs / 60000);
-          const seconds = Math.floor((seg.startTimeMs % 60000) / 1000);
-          const timeString = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-          
-          const isActive = activeSegmentId === seg.id;
-          
-          // Mükerrer metin temizleme
-          let displayText = seg.cleanText;
-          if (displayText.startsWith(timeString)) {
-            displayText = displayText.substring(timeString.length).trim();
-          }
+        {correctionMode === 'original' ? (
+          filteredSegments.slice(0, visibleCount).map(seg => {
+            const minutes = Math.floor(seg.startTimeMs / 60000);
+            const seconds = Math.floor((seg.startTimeMs % 60000) / 1000);
+            const timeString = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            
+            const isActive = activeSegmentId === seg.id;
+            
+            // Mükerrer metin temizleme
+            let displayText = seg.cleanText;
+            if (displayText.startsWith(timeString)) {
+              displayText = displayText.substring(timeString.length).trim();
+            }
 
-          let displaySecondaryText = seg.secondaryText;
-          if (displaySecondaryText && displaySecondaryText.startsWith(timeString)) {
-             displaySecondaryText = displaySecondaryText.substring(timeString.length).trim();
-          }
-          
-          return (
-            <div 
-              key={seg.id} 
-              ref={isActive ? activeSegmentRef : null}
-              className={`flex gap-3 p-2 rounded group transition-colors ${isActive ? 'bg-blue-100 dark:bg-blue-900/50' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}`}
-              style={{ fontSize: `${fontSize}px`, lineHeight: 1.4 }}
-            >
-              {showTimestamps && (
-                <button 
-                  onClick={() => seekTo(seg.startTimeMs)}
-                  className={`px-2 py-1 h-fit text-center rounded bg-gray-100 dark:bg-gray-800 hover:underline font-mono mt-0.5 ${isActive ? 'text-blue-700 dark:text-blue-200 font-bold' : 'text-blue-600 dark:text-blue-400'}`}
-                  style={{ fontSize: `${Math.max(10, fontSize - 2)}px` }}
-                  title="Videoda bu süreye git"
-                >
-                  {timeString}
-                </button>
-              )}
-              <div className={`flex-1 ${isActive ? 'font-medium text-black dark:text-white' : ''}`}>
-                <HighlightedText text={displayText} highlight={searchQuery} exact={exactMatch} />
-                {displaySecondaryText && (
-                  <div className={`mt-1 ${isActive ? 'text-yellow-600 dark:text-yellow-300' : 'text-yellow-600 dark:text-yellow-400'}`}>
-                    <HighlightedText text={displaySecondaryText} highlight={searchQuery} exact={exactMatch} />
-                  </div>
+            let displaySecondaryText = seg.secondaryText;
+            if (displaySecondaryText && displaySecondaryText.startsWith(timeString)) {
+               displaySecondaryText = displaySecondaryText.substring(timeString.length).trim();
+            }
+            
+            return (
+              <div 
+                key={seg.id} 
+                ref={isActive ? activeSegmentRef : null}
+                className={`flex gap-3 p-2 rounded group transition-colors ${isActive ? 'bg-blue-100 dark:bg-blue-900/50' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+                style={{ fontSize: `${fontSize}px`, lineHeight: 1.4 }}
+              >
+                {showTimestamps && (
+                  <button 
+                    onClick={() => seekTo(seg.startTimeMs)}
+                    className={`px-2 py-1 h-fit text-center rounded bg-gray-100 dark:bg-gray-800 hover:underline font-mono mt-0.5 ${isActive ? 'text-blue-700 dark:text-blue-200 font-bold' : 'text-blue-600 dark:text-blue-400'}`}
+                    style={{ fontSize: `${Math.max(10, fontSize - 2)}px` }}
+                    title="Videoda bu süreye git"
+                  >
+                    {timeString}
+                  </button>
                 )}
+                <div className={`flex-1 ${isActive ? 'font-medium text-black dark:text-white' : ''}`}>
+                  <HighlightedText text={displayText} highlight={searchQuery} exact={exactMatch} />
+                  {displaySecondaryText && (
+                    <div className={`mt-1 ${isActive ? 'text-yellow-600 dark:text-yellow-300' : 'text-yellow-600 dark:text-yellow-400'}`}>
+                      <HighlightedText text={displaySecondaryText} highlight={searchQuery} exact={exactMatch} />
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
-        {visibleCount < filteredSegments.length && (
+            );
+          })
+        ) : (
+          filteredSentences.slice(0, visibleCount).map(seg => {
+            const minutes = Math.floor(seg.startTimeMs / 60000);
+            const seconds = Math.floor((seg.startTimeMs % 60000) / 1000);
+            const timeString = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            
+            const isActive = activeSegmentId === seg.id;
+            
+            return (
+              <div 
+                key={seg.id} 
+                ref={isActive ? activeSegmentRef : null}
+                className={`flex gap-3 p-2 rounded group transition-colors ${isActive ? 'bg-blue-100 dark:bg-blue-900/50' : 'hover:bg-gray-200 dark:hover:bg-gray-700'}`}
+                style={{ fontSize: `${fontSize}px`, lineHeight: 1.4 }}
+              >
+                {showTimestamps && (
+                  <button 
+                    onClick={() => seekTo(seg.startTimeMs)}
+                    className={`px-2 py-1 h-fit text-center rounded bg-gray-100 dark:bg-gray-800 hover:underline font-mono mt-0.5 ${isActive ? 'text-blue-700 dark:text-blue-200 font-bold' : 'text-blue-600 dark:text-blue-400'}`}
+                    style={{ fontSize: `${Math.max(10, fontSize - 2)}px` }}
+                    title="Videoda bu süreye git"
+                  >
+                    {timeString}
+                  </button>
+                )}
+                <div className={`flex-1 ${isActive ? 'font-medium text-black dark:text-white' : ''}`}>
+                  {correctionMode === 'both' && (
+                    <div className="mb-2 pl-2 border-l-2 border-gray-300 dark:border-gray-500 opacity-70">
+                      <div className="text-gray-600 dark:text-gray-400">
+                        <HighlightedText text={seg.originalTurkish} highlight={searchQuery} exact={exactMatch} />
+                      </div>
+                      {seg.originalEnglish && (
+                        <div className="text-yellow-600/70 dark:text-yellow-400/70 mt-1">
+                          <HighlightedText text={seg.originalEnglish} highlight={searchQuery} exact={exactMatch} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  
+                  <div className="text-blue-900 dark:text-blue-100 font-medium">
+                    <HighlightedText text={seg.correctedTurkish} highlight={searchQuery} exact={exactMatch} />
+                  </div>
+                  {seg.correctedEnglish && (
+                    <div className="text-amber-700 dark:text-amber-400 mt-1">
+                      <HighlightedText text={seg.correctedEnglish} highlight={searchQuery} exact={exactMatch} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+        {visibleCount < displayedItemsLength && (
           <div className="text-center py-2 text-xs text-gray-500">
             Daha fazla yükleniyor...
           </div>

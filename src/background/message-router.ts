@@ -21,6 +21,13 @@ export type ExtensionMessage =
   | { type: 'PING_BACKGROUND' }
   | { type: 'TEST_CONNECTION'; providerId: any }
   | { type: 'API_SUMMARY_START'; taskId: string; videoId: string; request: any; config: any }
+  | { type: 'START_CORRECTION'; request: any }
+  | { type: 'API_CORRECTION_START'; taskId: string; videoId: string; request: any; config: any }
+  | { type: 'API_CORRECTION_COMPLETED'; taskId: string; videoId: string; result: any }
+  | { type: 'API_CORRECTION_FAILED'; taskId: string; videoId: string; error: any }
+  | { type: 'API_CORRECTION_CANCEL'; taskId: string; videoId: string }
+  | { type: 'API_CORRECTION_HEARTBEAT'; taskId: string; videoId: string }
+  | { type: 'API_CORRECTION_ACCEPTED'; taskId: string }
   | { type: 'API_SUMMARY_PROGRESS'; taskId: string; videoId: string; message: string; progress: number }
   | { type: 'API_SUMMARY_COMPLETED'; taskId: string; videoId: string; result: any }
   | { type: 'API_SUMMARY_FAILED'; taskId: string; videoId: string; error: any }
@@ -164,6 +171,69 @@ export function setupMessageRouter() {
       return true;
     }
 
+    if (message.type === 'START_CORRECTION') {
+      const { request } = message as any;
+      const tabId = sender.tab?.id;
+      if (!tabId) {
+        sendResponse({ success: false, error: 'No tab context for START_CORRECTION' });
+        return true;
+      }
+
+      const taskState = {
+        taskId: request.taskId,
+        tabId,
+        videoId: request.video.videoId,
+        status: 'preparing',
+        startedAt: Date.now(),
+        lastHeartbeatAt: Date.now()
+      };
+      chrome.storage.session.set({ [`api_task_${request.taskId}`]: taskState }).catch(console.error);
+
+      new Promise<void>((resolve, reject) => {
+        let resolved = false;
+        
+        const timeoutId = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            chrome.runtime.onMessage.removeListener(acceptListener);
+            reject(new Error('Offscreen worker yanıt vermedi.'));
+          }
+        }, 5000);
+
+        const acceptListener = (msg: any) => {
+          if (msg.type === 'API_CORRECTION_ACCEPTED' && msg.taskId === request.taskId) {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(timeoutId);
+              chrome.runtime.onMessage.removeListener(acceptListener);
+              resolve();
+            }
+          }
+        };
+        chrome.runtime.onMessage.addListener(acceptListener);
+
+        AISettingsService.getProviderConfig('openai-compatible').then(config => {
+          return setupOffscreenDocument().then(() => config);
+        }).then(config => {
+          chrome.runtime.sendMessage({
+            type: 'API_CORRECTION_START',
+            taskId: request.taskId,
+            videoId: request.video.videoId,
+            request,
+            config
+          }).catch(e => reject(e));
+        }).catch(e => reject(e));
+
+      }).then(() => {
+        sendResponse({ success: true, taskId: request.taskId, accepted: true });
+      }).catch(err => {
+        chrome.storage.session.remove(`api_task_${request.taskId}`).catch(console.error);
+        sendResponse({ success: false, error: err.message || 'Başlatılamadı' });
+      });
+
+      return true;
+    }
+
     // 4. CANCEL_SUMMARY - requires tab context
     if (message.type === 'CANCEL_SUMMARY') {
       const { taskId } = message;
@@ -247,6 +317,40 @@ export function setupMessageRouter() {
                   status: 'summarizing',
                   message: (message as any).message,
                   progress: (message as any).progress
+              }).catch(e => {
+                  console.error(`[API Task] delivery failed for task ${(message as any).taskId}:`, e);
+              });
+           }
+        }
+      });
+      sendResponse({ success: true });
+      return true;
+    }
+
+    // 7.5 API_CORRECTION_* Relay
+    if (message.type.startsWith('API_CORRECTION_') && message.type !== 'API_CORRECTION_START' && message.type !== 'API_CORRECTION_CANCEL') {
+      chrome.storage.session.get(`api_task_${(message as any).taskId}`).then((data) => {
+        const taskState = data[`api_task_${(message as any).taskId}`];
+        if (taskState && taskState.tabId) {
+           if (message.type === 'API_CORRECTION_HEARTBEAT') {
+              chrome.storage.session.set({ 
+                  [`api_task_${(message as any).taskId}`]: { ...taskState, lastHeartbeatAt: Date.now() } 
+              }).catch(console.error);
+           } else if (message.type === 'API_CORRECTION_COMPLETED') {
+              chrome.storage.session.remove(`api_task_${(message as any).taskId}`).catch(console.error);
+              chrome.tabs.sendMessage(taskState.tabId, {
+                  type: 'CORRECTION_COMPLETED',
+                  taskId: (message as any).taskId,
+                  result: (message as any).result
+              }).catch(e => {
+                  console.error(`[API Task] delivery failed for task ${(message as any).taskId}:`, e);
+              });
+           } else if (message.type === 'API_CORRECTION_FAILED') {
+              chrome.storage.session.remove(`api_task_${(message as any).taskId}`).catch(console.error);
+              chrome.tabs.sendMessage(taskState.tabId, {
+                  type: 'CORRECTION_FAILED',
+                  taskId: (message as any).taskId,
+                  error: (message as any).error
               }).catch(e => {
                   console.error(`[API Task] delivery failed for task ${(message as any).taskId}:`, e);
               });
