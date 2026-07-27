@@ -57,6 +57,8 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
   const [correctionMode, setCorrectionMode] = useState<'original' | 'corrected' | 'both'>('original');
   const [correctedSentences, setCorrectedSentences] = useState<CorrectedBilingualSentence[] | null>(null);
   const [isCorrecting, setIsCorrecting] = useState(false);
+  const [correctionProgress, setCorrectionProgress] = useState<{stage: string; message: string; elapsedMs: number} | null>(null);
+  const [correctionSuccessMsg, setCorrectionSuccessMsg] = useState<string | null>(null);
   const [correctionError, setCorrectionError] = useState<string | null>(null);
   const [pendingCorrection, setPendingCorrection] = useState(false);
   const activeCorrectionTaskIdRef = useRef<string | null>(null);
@@ -134,10 +136,12 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       
       if (message.type === 'CORRECTION_COMPLETED') {
         setIsCorrecting(false);
+        setCorrectionProgress(null);
         const enrichedSentences = message.result.sentences;
 
         setCorrectedSentences(enrichedSentences);
         setCorrectionMode('both');
+        setCorrectionSuccessMsg(`Düzeltme tamamlandı: ${enrichedSentences.length} anlamlı çift dilli cümle oluşturuldu.`);
         
         // Save to DB
         const currentHash = result?.segments.map(s => s.id).join(',');
@@ -157,7 +161,14 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
 
       } else if (message.type === 'CORRECTION_FAILED') {
         setIsCorrecting(false);
+        setCorrectionProgress(null);
         setCorrectionError(message.error?.userMessage || 'Düzeltme başarısız.');
+      } else if (message.type === 'CORRECTION_PROGRESS') {
+        setCorrectionProgress({
+          stage: message.stage,
+          message: message.message,
+          elapsedMs: message.elapsedMs
+        });
       }
     };
     chrome.runtime.onMessage.addListener(listener);
@@ -447,6 +458,8 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
     try {
       setIsCorrecting(true);
       setCorrectionError(null);
+      setCorrectionSuccessMsg(null);
+      setCorrectionProgress({ stage: 'preparing', message: 'Türkçe ve İngilizce transkript hazırlanıyor...', elapsedMs: 0 });
       
       const taskId = `correction_${Date.now()}`;
       setCorrectionMode('both');
@@ -486,8 +499,23 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       }
     } catch (e: any) {
       setIsCorrecting(false);
+      setCorrectionProgress(null);
       setCorrectionError(e.message || 'Düzeltme başlatılamadı.');
     }
+  };
+
+  const cancelCorrection = () => {
+    if (activeCorrectionTaskIdRef.current) {
+      chrome.runtime.sendMessage({
+        type: 'CANCEL_CORRECTION',
+        taskId: activeCorrectionTaskIdRef.current,
+        videoId
+      }).catch(console.error);
+    }
+    setIsCorrecting(false);
+    setCorrectionProgress(null);
+    setPendingCorrection(false);
+    setCorrectionError('İstek kullanıcı tarafından iptal edildi.');
   };
 
   const startCorrection = async () => {
@@ -556,7 +584,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
               disabled={isCorrecting || pendingCorrection}
               className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
             >
-              {isCorrecting || pendingCorrection ? '⏳ Düzeltiliyor...' : (correctedSentences ? '✨ Yeniden Düzelt' : '✨ Düzelt')}
+              {correctedSentences ? '✨ Yeniden Düzelt' : '✨ Düzelt'}
             </button>
             <div className="flex items-center">
               <span className="font-semibold">Kalite: </span>
@@ -626,17 +654,49 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
         </div>
       )}
 
-      {correctionError && (
-        <div className="text-red-600 dark:text-red-400 text-xs p-2 bg-red-50 dark:bg-red-900/20 rounded shrink-0 flex justify-between items-center">
-          <span>⚠️ {correctionError}</span>
-          <button onClick={() => setCorrectionError(null)} className="underline font-semibold ml-2 text-red-700 dark:text-red-300">Kapat</button>
+      {dualLangWarning && !error && (
+        <div className="bg-yellow-100 dark:bg-yellow-900 border-l-4 border-yellow-500 text-yellow-700 dark:text-yellow-200 p-2 text-xs shrink-0 flex justify-between items-center">
+          <span>{dualLangWarning}</span>
+          <button onClick={() => setReloadCounter(c => c + 1)} className="ml-2 px-2 py-1 bg-yellow-200 dark:bg-yellow-800 rounded hover:bg-yellow-300 dark:hover:bg-yellow-700 font-semibold transition-colors">
+            Tekrar Dene
+          </button>
         </div>
       )}
 
-      {dualLangWarning && (
-        <div className="text-amber-600 dark:text-amber-400 text-xs p-2 bg-amber-50 dark:bg-amber-900/20 rounded shrink-0 flex justify-between items-center">
-          <span>⚠️ {dualLangWarning}</span>
-          <button onClick={() => setReloadCounter(c => c + 1)} className="underline font-semibold ml-2 text-amber-700 dark:text-amber-300">Tekrar Dene</button>
+      {(isCorrecting || pendingCorrection) && correctionProgress && (
+        <div className="bg-blue-50 dark:bg-blue-900 border-l-4 border-blue-500 text-blue-800 dark:bg-blue-200 p-3 text-sm shrink-0 shadow-sm rounded-r flex justify-between items-center">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <svg className="animate-spin h-4 w-4 text-blue-600 dark:text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span className="font-semibold text-blue-900 dark:text-blue-100">Transkript Düzeltiliyor...</span>
+            </div>
+            <div className="text-xs text-blue-700 dark:text-blue-300 pl-6">
+              {correctionProgress.message}
+            </div>
+          </div>
+          <button 
+            onClick={cancelCorrection}
+            className="px-3 py-1.5 bg-white dark:bg-blue-800 text-blue-600 dark:text-blue-200 rounded border border-blue-200 dark:border-blue-700 hover:bg-blue-100 dark:hover:bg-blue-700 font-semibold transition-colors shadow-sm text-xs"
+          >
+            İptal
+          </button>
+        </div>
+      )}
+      
+      {correctionSuccessMsg && !isCorrecting && !pendingCorrection && (
+        <div className="bg-green-100 dark:bg-green-900 border-l-4 border-green-500 text-green-700 dark:text-green-200 p-2 text-xs shrink-0 flex justify-between items-center">
+          <span>{correctionSuccessMsg}</span>
+          <button onClick={() => setCorrectionSuccessMsg(null)} className="opacity-75 hover:opacity-100 font-bold ml-2">×</button>
+        </div>
+      )}
+
+      {correctionError && (
+        <div className="bg-red-100 dark:bg-red-900 border-l-4 border-red-500 text-red-700 dark:text-red-200 p-2 text-xs shrink-0 flex justify-between items-center">
+          <span>{correctionError}</span>
+          <button onClick={() => setCorrectionError(null)} className="opacity-75 hover:opacity-100 font-bold ml-2">×</button>
         </div>
       )}
 

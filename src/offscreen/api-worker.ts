@@ -251,6 +251,16 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
   const controller = new AbortController();
   
   const heartbeatId = window.setInterval(() => {
+    const elapsed = Math.round((performance.now() - startedAt) / 1000);
+    chrome.runtime.sendMessage({
+      type: 'API_CORRECTION_PROGRESS',
+      taskId,
+      videoId,
+      stage: 'waiting',
+      message: `Yapay zeka yanıtı bekleniyor... ${elapsed} sn`,
+      elapsedMs: Math.round(performance.now() - startedAt)
+    }).catch(console.error);
+
     chrome.runtime.sendMessage({
       type: 'API_CORRECTION_HEARTBEAT',
       taskId,
@@ -283,6 +293,15 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
     const body = CorrectionPromptBuilder.buildApiRequestBody(request, config);
 
     console.log(`[API Task] correction POST started`);
+    chrome.runtime.sendMessage({
+      type: 'API_CORRECTION_PROGRESS',
+      taskId,
+      videoId,
+      stage: 'sending',
+      message: 'İstek API\'ye gönderiliyor...',
+      elapsedMs: Math.round(performance.now() - startedAt)
+    }).catch(console.error);
+    
     const fetchStart = performance.now();
     const response = await fetch(url, {
       method: 'POST',
@@ -325,6 +344,15 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
     if (data.choices[0].finish_reason === 'content_filter') {
        throw new Error("İçerik filtrelemesi nedeniyle yanıt alınamadı.");
     }
+
+    chrome.runtime.sendMessage({
+      type: 'API_CORRECTION_PROGRESS',
+      taskId,
+      videoId,
+      stage: 'parsing',
+      message: 'Yapay zeka yanıtı ayrıştırılıyor...',
+      elapsedMs: Math.round(performance.now() - startedAt)
+    }).catch(console.error);
 
     const sentences = CorrectionResponseParser.parse(aiResponseText);
     const enrichedSentences = CorrectionResponseParser.enrichCorrectedSentences(

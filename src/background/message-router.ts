@@ -14,6 +14,7 @@ export type ExtensionMessage =
   | { type: 'CAPTURE_NATIVE_CAPTION'; requestId: string; videoId: string; sourceLanguage: string; sourceKind?: string; targetLanguage?: string }
   | { type: 'START_SUMMARY'; request: SummaryRequest }
   | { type: 'CANCEL_SUMMARY'; taskId: string }
+  | { type: 'CANCEL_CORRECTION'; taskId: string }
   | { type: 'GET_PANEL_SETTINGS' }
   | { type: 'GET_GEM_SETTINGS' }
   | { type: 'PANEL_SETTINGS_CHANGED' }
@@ -27,6 +28,7 @@ export type ExtensionMessage =
   | { type: 'API_CORRECTION_FAILED'; taskId: string; videoId: string; error: any }
   | { type: 'API_CORRECTION_CANCEL'; taskId: string; videoId: string }
   | { type: 'API_CORRECTION_HEARTBEAT'; taskId: string; videoId: string }
+  | { type: 'API_CORRECTION_PROGRESS'; taskId: string; videoId: string; stage: string; message: string; elapsedMs: number }
   | { type: 'API_CORRECTION_ACCEPTED'; taskId: string }
   | { type: 'API_SUMMARY_PROGRESS'; taskId: string; videoId: string; message: string; progress: number }
   | { type: 'API_SUMMARY_COMPLETED'; taskId: string; videoId: string; result: any }
@@ -251,6 +253,19 @@ export function setupMessageRouter() {
       return true;
     }
 
+    // 4.5 CANCEL_CORRECTION
+    if (message.type === 'CANCEL_CORRECTION') {
+      const { taskId } = message;
+      chrome.storage.session.get(`api_task_${taskId}`).then((data) => {
+        if (data[`api_task_${taskId}`]) {
+          chrome.runtime.sendMessage({ type: 'API_CORRECTION_CANCEL', taskId, videoId: '' }).catch(console.error);
+          chrome.storage.session.remove(`api_task_${taskId}`).catch(console.error);
+        }
+      });
+      sendResponse({ success: true });
+      return true;
+    }
+
     // 5. GET_ACTIVE_API_TASK
     if (message.type === 'GET_ACTIVE_API_TASK') {
       const { videoId } = message as any;
@@ -351,6 +366,16 @@ export function setupMessageRouter() {
                   type: 'CORRECTION_FAILED',
                   taskId: (message as any).taskId,
                   error: (message as any).error
+              }).catch(e => {
+                  console.error(`[API Task] delivery failed for task ${(message as any).taskId}:`, e);
+              });
+           } else if (message.type === 'API_CORRECTION_PROGRESS') {
+              chrome.tabs.sendMessage(taskState.tabId, {
+                  type: 'CORRECTION_PROGRESS',
+                  taskId: (message as any).taskId,
+                  stage: (message as any).stage,
+                  message: (message as any).message,
+                  elapsedMs: (message as any).elapsedMs
               }).catch(e => {
                   console.error(`[API Task] delivery failed for task ${(message as any).taskId}:`, e);
               });
