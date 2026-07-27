@@ -261,12 +261,25 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
           activeCorrectionTaskIdRef.current = null;
           setCorrectedSentences(enrichedSentences);
           setCorrectionMode('both');
-          setCorrectionSuccessMsg(`Düzeltme tamamlandı: ${enrichedSentences.length} anlamlı çift dilli cümle oluşturuldu.`);
+          
+          const warningCount = enrichedSentences.reduce((sum: number, s: any) => sum + (s.warnings?.length ? 1 : 0), 0);
+          if (warningCount > 0) {
+            setCorrectionSuccessMsg(`Düzeltme tamamlandı. ${warningCount} cümlede eksik AI alanı için orijinal metin korundu.`);
+          } else {
+            setCorrectionSuccessMsg(`Düzeltme tamamlandı: ${enrichedSentences.length} anlamlı çift dilli cümle oluşturuldu.`);
+          }
           setTimeout(() => setCorrectionSuccessMsg(null), 5000);
         }).catch(console.error);
 
       } else if (message.type === 'CORRECTION_FAILED') {
-        finishCorrectionWithError(message.error?.userMessage || 'Düzeltme başarısız.');
+        const error = message.error;
+        if (error) {
+          console.groupCollapsed(`[ZYouTube Correction] ${error.code || 'UNKNOWN'} — ${error.stage || 'unknown'}`);
+          console.error(error.userMessage || 'Düzeltme başarısız.');
+          console.table(error.diagnostics || {});
+          console.groupEnd();
+        }
+        finishCorrectionWithError(error?.userMessage || 'Düzeltme başarısız.');
       } else if (message.type === 'CORRECTION_PROGRESS') {
         setCorrectionProgress({
           stage: message.stage,
@@ -334,44 +347,57 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
             if (active) setDualLangWarning('İngilizce çeviri alınamadı. Yalnızca Türkçe gösteriliyor.');
           }
           
-          // Fix 4: İki işaretçili eşleştirme
+          // Fix 4: İki işaretçili sağlam eşleştirme
           const mergedSegments = resTr.segments.map((seg) => {
-            return { ...seg };
+            return { ...seg, enParts: [] as string[] };
           });
           
           if (resEn && resEn.segments.length > 0) {
-             let secIndex = 0;
-             for (let i = 0; i < mergedSegments.length; i++) {
-                const seg = mergedSegments[i];
+             for (const enSeg of resEn.segments) {
+                const enEnd = enSeg.startTimeMs + enSeg.durationMs;
                 let bestMatchIndex = -1;
+                let maxOverlap = 0;
                 let bestDiff = Infinity;
                 
-                // Önceki, mevcut ve sonraki en fazla üç adayı değerlendir
-                for (let k = 0; k < 3; k++) {
-                   const currIndex = secIndex + k;
-                   if (currIndex >= resEn.segments.length) break;
-                   const enSeg = resEn.segments[currIndex];
-                   
+                // 1. En yüksek zaman örtüşmesini bul
+                for (let i = 0; i < mergedSegments.length; i++) {
+                   const seg = mergedSegments[i];
                    const segEnd = seg.startTimeMs + seg.durationMs;
-                   const enEnd = enSeg.startTimeMs + enSeg.durationMs;
-                   const isOverlap = (enSeg.startTimeMs < segEnd) && (enEnd > seg.startTimeMs);
                    
-                   if (isOverlap) {
-                      bestMatchIndex = currIndex;
-                      break; // Önce zaman aralığı örtüşmesini kabul et
-                   }
+                   const overlapStart = Math.max(enSeg.startTimeMs, seg.startTimeMs);
+                   const overlapEnd = Math.min(enEnd, segEnd);
+                   const overlap = overlapEnd - overlapStart;
                    
-                   const diff = Math.abs(seg.startTimeMs - enSeg.startTimeMs);
-                   if (diff < bestDiff && diff <= 5000) { // 5 saniyeden büyük farkı kabul etme
-                      bestDiff = diff;
-                      bestMatchIndex = currIndex;
+                   if (overlap > 0 && overlap > maxOverlap) {
+                      maxOverlap = overlap;
+                      bestMatchIndex = i;
                    }
                 }
                 
-                if (bestMatchIndex >= 0) {
-                   seg.secondaryText = resEn.segments[bestMatchIndex].cleanText;
-                   secIndex = bestMatchIndex + 1;
+                // 2. Örtüşme yoksa en yakın başlangıç zamanına (max 5sn) bak
+                if (bestMatchIndex === -1) {
+                   for (let i = 0; i < mergedSegments.length; i++) {
+                      const diff = Math.abs(mergedSegments[i].startTimeMs - enSeg.startTimeMs);
+                      if (diff < bestDiff && diff <= 5000) {
+                         bestDiff = diff;
+                         bestMatchIndex = i;
+                      }
+                   }
                 }
+                
+                // İngilizce parçayı ata
+                if (bestMatchIndex >= 0 && enSeg.cleanText) {
+                   mergedSegments[bestMatchIndex].enParts.push(enSeg.cleanText);
+                }
+             }
+             
+             // Parçaları birleştir ve bitişik tekrarları sil
+             for (const seg of mergedSegments) {
+                if (seg.enParts.length > 0) {
+                   const uniqueParts = seg.enParts.filter((part, idx, arr) => idx === 0 || part !== arr[idx - 1]);
+                   (seg as any).secondaryText = uniqueParts.join(' ');
+                }
+                delete (seg as any).enParts;
              }
           }
           
@@ -581,6 +607,37 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
           english: enText
         };
       });
+
+      let emptyTurkishSegmentCount = 0;
+      let emptyEnglishSegmentCount = 0;
+      let turkishCharacterCount = 0;
+      let englishCharacterCount = 0;
+
+      for (const seg of mappedSegments) {
+        if (!seg.turkish || seg.turkish.trim() === '') emptyTurkishSegmentCount++;
+        else turkishCharacterCount += seg.turkish.length;
+
+        if (!seg.english || seg.english.trim() === '') emptyEnglishSegmentCount++;
+        else englishCharacterCount += seg.english.length;
+      }
+
+      const segmentCount = mappedSegments.length;
+      const englishCoverageRatio = segmentCount > 0 ? ((segmentCount - emptyEnglishSegmentCount) / segmentCount) : 0;
+
+      console.log('[ZYouTube Correction] Input coverage', {
+        videoId,
+        segmentCount,
+        emptyTurkishSegmentCount,
+        emptyEnglishSegmentCount,
+        turkishCharacterCount,
+        englishCharacterCount,
+        englishCoverageRatio
+      });
+
+      if (englishCharacterCount === 0) {
+        finishCorrectionWithError('İngilizce transkript içeriği bulunamadığı için düzeltme başlatılamadı.');
+        return;
+      }
 
       const request = {
         taskId,

@@ -479,12 +479,35 @@ model: ${body.model}`);
     });
     
   } catch (e: any) {
-    console.log(`[API Task] correction failed:`, e);
     const isTimeout = e.message === 'Timeout';
     const isAbort = e.name === 'AbortError' || e.message === 'AbortError';
     
-    const errorCode = isAbort ? 'REQUEST_CANCELLED' : (isTimeout ? 'TIMEOUT' : 'UNKNOWN_ERROR');
+    let stage = 'unknown';
+    let errorCode = isAbort ? 'REQUEST_CANCELLED' : (isTimeout ? 'TIMEOUT' : 'UNKNOWN_ERROR');
+    
+    if (e.code === 'CORRECTION_LANGUAGE_MISSING' || e.message.includes('Düzeltme sonucu geçersiz') || e.message.includes('Aralık')) {
+      stage = 'validation';
+      if (e.code) errorCode = e.code;
+    } else if (e.message.includes('JSON olarak ayrıştırılamadı') || e.message.includes('sentences dizisi bulunamadı') || e.message.includes('işlenirken hata oluştu')) {
+      stage = 'parsing';
+    } else if (e.message.includes('Bağlantı hatası')) {
+      stage = 'http';
+    } else if (e.message.includes('stream') || e.message.includes('JSON yanıt akışı')) {
+      stage = 'streaming';
+    }
+    
     const userMsg = isAbort ? 'İstek iptal edildi.' : (isTimeout ? 'İstek zaman aşımına uğradı.' : (e.message || 'Beklenmeyen hata.'));
+    
+    console.error("[ZYouTube Correction Error]", {
+      taskId,
+      videoId,
+      stage,
+      errorCode,
+      message: e.message,
+      model: config.model,
+      elapsedMs: Math.round(performance.now() - startedAt),
+      diagnostics: e.diagnostics
+    });
     
     chrome.runtime.sendMessage({
         type: 'API_CORRECTION_FAILED',
@@ -492,7 +515,10 @@ model: ${body.model}`);
         videoId,
         error: {
             code: errorCode,
+            stage,
             userMessage: userMsg,
+            technicalMessage: e.message,
+            diagnostics: e.diagnostics,
             retryable: !isAbort
         }
     }).catch(err => console.error(err));

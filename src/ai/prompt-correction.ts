@@ -15,6 +15,11 @@ KURALLAR:
 9. sentences dışında üst seviye alan ekleme.
 10. Girdi segmentleri dizi formatındadır: [index, startTimeMs, endTimeMs, "TR metin", "EN metin"].
 11. Çıktıdaki 'from' ve 'to' değerleri kaynak segmentin indeksini ifade eder. İlk cümlenin 'from' değeri 0 olmalı. Ardışık her cümlenin 'from' değeri bir öncekinin 'to' değerinden bir fazla olmalıdır. Son cümlenin 'to' değeri son giriş segmentinin indeksi olmalıdır. Asla atlama veya geriye dönme yapma.
+12. Her sentences öğesinde from, to, tr ve en alanları zorunludur. tr ve en boş string, null veya eksik olamaz.
+13. Bir giriş satırındaki EN alanı boşsa Türkçe metinden doğal İngilizce karşılığını üret.
+14. Bir giriş satırındaki TR alanı boşsa İngilizce metinden doğal Türkçe karşılığını üret.
+15. Kaynak dil alanlarından biri boş olduğu için kesinlikle çıktı alanını boş bırakma.
+16. Yanıtı bitirmeden önce her cümlede tr ve en alanlarının kesinlikle dolu olduğunu kontrol et.
 
 JSON ÇIKTI ŞABLONU:
 {

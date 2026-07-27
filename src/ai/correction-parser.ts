@@ -1,6 +1,12 @@
 import { CorrectedBilingualSentence } from '../settings/types';
 
 export class CorrectionResponseParser {
+  private static normalizeLanguageText(value: unknown): string {
+    if (typeof value === 'string') return value.trim();
+    if (Array.isArray(value)) return value.join(' ').trim();
+    return '';
+  }
+
   private static extractBalancedJson(text: string, startChar: '{' | '['): string | null {
     let searchIndex = 0;
     while (true) {
@@ -135,20 +141,9 @@ export class CorrectionResponseParser {
            throw new Error(`Cümle ${index} eksik from/to veya sourceSegmentIds içeriyor.`);
         }
 
-        if (typeof s.tr === 'string' && s.tr.trim() !== '') {
-          s.correctedTurkish = s.tr;
-        }
-        if (typeof s.en === 'string' && s.en.trim() !== '') {
-          s.correctedEnglish = s.en;
-        }
+        let trText = this.normalizeLanguageText(s.tr) || this.normalizeLanguageText(s.correctedTurkish) || this.normalizeLanguageText(s.turkish) || this.normalizeLanguageText(s.turkishText);
+        let enText = this.normalizeLanguageText(s.en) || this.normalizeLanguageText(s.correctedEnglish) || this.normalizeLanguageText(s.english) || this.normalizeLanguageText(s.englishText);
 
-        if (typeof s.correctedTurkish !== 'string' || s.correctedTurkish.trim() === '') {
-           throw new Error(`Cümle ${index} eksik veya boş correctedTurkish/tr içeriyor.`);
-        }
-        if (typeof s.correctedEnglish !== 'string' || s.correctedEnglish.trim() === '') {
-           throw new Error(`Cümle ${index} eksik veya boş correctedEnglish/en içeriyor.`);
-        }
-        
         const rawConfidence = Number(s.confidence);
         const confidence = Number.isFinite(rawConfidence) ? Math.max(0, Math.min(1, rawConfidence)) : 1;
         
@@ -159,8 +154,8 @@ export class CorrectionResponseParser {
           sourceSegmentIds: segmentIds,
           originalTurkish: '',
           originalEnglish: '',
-          correctedTurkish: s.correctedTurkish,
-          correctedEnglish: s.correctedEnglish,
+          correctedTurkish: trText,
+          correctedEnglish: enText,
           sourceLanguage: 'tr',
           confidence: confidence
         };
@@ -243,14 +238,74 @@ export class CorrectionResponseParser {
 
       sentence.startTimeMs = minStart !== Infinity ? minStart : 0;
       sentence.endTimeMs = maxEnd !== -Infinity ? maxEnd : 0;
-      sentence.originalTurkish = trParts.join(' ');
-      sentence.originalEnglish = enParts.join(' ');
+      
+      const originalTurkish = trParts.join(' ').trim();
+      const originalEnglish = enParts.join(' ').trim();
+      
+      sentence.originalTurkish = originalTurkish;
+      sentence.originalEnglish = originalEnglish;
       sentence.sourceLanguage = sourceLanguage;
+      sentence.warnings = [];
+
+      let trFallback = false;
+      let enFallback = false;
+
+      if (!sentence.correctedTurkish) {
+        if (!originalTurkish) {
+          const error: any = new Error(`${sentenceAny.index + 1}. cümle için Türkçe çıktı üretilemedi ve kaynak Türkçe metin de bulunamadı. Aralık: ${sentence._from}-${sentence._to}.`);
+          error.code = 'CORRECTION_LANGUAGE_MISSING';
+          error.diagnostics = {
+            sentenceNumber: sentenceAny.index + 1,
+            from: sentence._from,
+            to: sentence._to,
+            missingLanguage: 'tr',
+            returnedKeys: Object.keys(sentenceAny),
+            aiTurkishLength: 0,
+            aiEnglishLength: sentence.correctedEnglish?.length || 0,
+            sourceTurkishLength: 0,
+            sourceEnglishLength: originalEnglish.length
+          };
+          throw error;
+        }
+        sentence.correctedTurkish = originalTurkish;
+        trFallback = true;
+      }
+
+      if (!sentence.correctedEnglish) {
+        if (!originalEnglish) {
+          const error: any = new Error(`${sentenceAny.index + 1}. cümle için İngilizce çıktı üretilemedi ve kaynak İngilizce metin de bulunamadı. Aralık: ${sentence._from}-${sentence._to}.`);
+          error.code = 'CORRECTION_LANGUAGE_MISSING';
+          error.diagnostics = {
+            sentenceNumber: sentenceAny.index + 1,
+            from: sentence._from,
+            to: sentence._to,
+            missingLanguage: 'en',
+            returnedKeys: Object.keys(sentenceAny),
+            aiTurkishLength: sentence.correctedTurkish?.length || 0,
+            aiEnglishLength: 0,
+            sourceTurkishLength: originalTurkish.length,
+            sourceEnglishLength: 0
+          };
+          throw error;
+        }
+        sentence.correctedEnglish = originalEnglish;
+        enFallback = true;
+      }
 
       if (sentence.confidence !== undefined) {
         sentence.confidence = Math.max(0, Math.min(1, sentence.confidence));
       } else {
         sentence.confidence = 1.0;
+      }
+
+      if (trFallback) {
+        sentence.confidence = Math.min(sentence.confidence, 0.5);
+        sentence.warnings.push(`${sentenceAny.index + 1}. cümlede yapay zekâ Türkçe çıktı üretmedi; orijinal Türkçe metin kullanıldı.`);
+      }
+      
+      if (enFallback) {
+        sentence.confidence = Math.min(sentence.confidence, 0.5);
+        sentence.warnings.push(`${sentenceAny.index + 1}. cümlede yapay zekâ İngilizce çıktı üretmedi; orijinal İngilizce metin kullanıldı.`);
       }
 
       return sentence;

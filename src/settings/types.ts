@@ -17,6 +17,7 @@ export interface CorrectedBilingualSentence {
 
   sourceLanguage: "tr" | "en";
   confidence?: number;
+  warnings?: string[];
 }
 
 

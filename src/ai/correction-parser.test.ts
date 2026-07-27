@@ -109,12 +109,19 @@ describe('CorrectionResponseParser', () => {
       expect(() => CorrectionResponseParser.parse(json)).toThrow(/eksik veya boş sourceSegmentIds/);
     });
 
-    it('boş Türkçe/İngilizce hatası', () => {
+    it('boş Türkçe/İngilizce durumunda parsing durmaz', () => {
       const jsonTr = JSON.stringify({ sentences: [{ sourceSegmentIds: ['s1'], correctedTurkish: '   ', correctedEnglish: 'A' }] });
-      expect(() => CorrectionResponseParser.parse(jsonTr)).toThrow(/eksik veya boş correctedTurkish/);
+      expect(() => CorrectionResponseParser.parse(jsonTr)).not.toThrow();
       
       const jsonEn = JSON.stringify({ sentences: [{ sourceSegmentIds: ['s1'], correctedTurkish: 'A', correctedEnglish: '' }] });
-      expect(() => CorrectionResponseParser.parse(jsonEn)).toThrow(/eksik veya boş correctedEnglish/);
+      expect(() => CorrectionResponseParser.parse(jsonEn)).not.toThrow();
+    });
+
+    it('alias alanlarını destekler', () => {
+      const json = JSON.stringify({ sentences: [{ sourceSegmentIds: ['s1'], turkishText: 'TR_TEXT', englishText: 'EN_TEXT' }] });
+      const res = CorrectionResponseParser.parse(json);
+      expect(res[0].correctedTurkish).toBe('TR_TEXT');
+      expect(res[0].correctedEnglish).toBe('EN_TEXT');
     });
 
     it('confidence 0 değerinin korunması', () => {
@@ -151,6 +158,42 @@ describe('CorrectionResponseParser', () => {
       ];
       expect(() => CorrectionResponseParser.enrichCorrectedSentences(sentences, dummySegments, 'tr'))
         .toThrow(/Kaynak segment sırası bozuk/);
+    });
+
+    it('en boş, originalEnglish dolu -> başarı ve fallback warning', () => {
+      const segs = [{ id: 'seg-1', startTimeMs: 0, endTimeMs: 1000, turkish: 'TR', english: 'en-A' }];
+      const sentences: any = [
+        { index: 0, id: '1', _from: 0, _to: 0, sourceSegmentIds: ['seg-1'], correctedTurkish: 'TR', correctedEnglish: '', confidence: 1 }
+      ];
+      const enriched = CorrectionResponseParser.enrichCorrectedSentences(sentences, segs, 'tr');
+      expect(enriched[0].correctedEnglish).toBe('en-A');
+      expect(enriched[0].confidence).toBe(0.5);
+      expect(enriched[0].warnings).toContain('1. cümlede yapay zekâ İngilizce çıktı üretmedi; orijinal İngilizce metin kullanıldı.');
+    });
+
+    it('tr boş, originalTurkish dolu -> başarı ve fallback warning', () => {
+      const segs = [{ id: 'seg-1', startTimeMs: 0, endTimeMs: 1000, turkish: 'A', english: 'EN' }];
+      const sentences: any = [
+        { index: 2, id: '1', _from: 0, _to: 0, sourceSegmentIds: ['seg-1'], correctedTurkish: '', correctedEnglish: 'EN', confidence: 0.9 }
+      ];
+      const enriched = CorrectionResponseParser.enrichCorrectedSentences(sentences, segs, 'en');
+      expect(enriched[0].correctedTurkish).toBe('A');
+      expect(enriched[0].confidence).toBe(0.5);
+      expect(enriched[0].warnings).toContain('3. cümlede yapay zekâ Türkçe çıktı üretmedi; orijinal Türkçe metin kullanıldı.');
+    });
+
+    it('en boş, originalEnglish de boş -> CORRECTION_LANGUAGE_MISSING', () => {
+      const emptySegments = [{ id: 'seg-e', startTimeMs: 0, endTimeMs: 1000, turkish: 'TR', english: '' }];
+      const sentences: any = [
+        { index: 3, id: '1', _from: 0, _to: 0, sourceSegmentIds: ['seg-e'], correctedTurkish: 'TR', correctedEnglish: '' }
+      ];
+      try {
+        CorrectionResponseParser.enrichCorrectedSentences(sentences, emptySegments, 'tr');
+        expect(true).toBe(false); // Should have thrown
+      } catch (err: any) {
+        expect(err.code).toBe('CORRECTION_LANGUAGE_MISSING');
+        expect(err.message).toContain('4. cümle için İngilizce çıktı üretilemedi');
+      }
     });
   });
 });
