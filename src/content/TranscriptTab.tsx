@@ -301,7 +301,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
          behavior: 'smooth'
        });
     }
-  }, [currentTime, autoSync, searchQuery, result, activeSegmentId]);
+  }, [currentTime, autoSync, searchQuery, result, activeSegmentId, visibleCount]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.target as HTMLDivElement;
@@ -409,8 +409,9 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       )}
 
       {dualLangWarning && (
-        <div className="text-amber-600 dark:text-amber-400 text-xs p-2 bg-amber-50 dark:bg-amber-900/20 rounded shrink-0">
-          ⚠️ {dualLangWarning}
+        <div className="text-amber-600 dark:text-amber-400 text-xs p-2 bg-amber-50 dark:bg-amber-900/20 rounded shrink-0 flex justify-between items-center">
+          <span>⚠️ {dualLangWarning}</span>
+          <button onClick={() => setReloadCounter(c => c + 1)} className="underline font-semibold ml-2 text-amber-700 dark:text-amber-300">Tekrar Dene</button>
         </div>
       )}
 

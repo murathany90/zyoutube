@@ -146,48 +146,42 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', cur
       setStatus('preparing');
       setProgressMessage('Transkript çekiliyor...');
 
-      let transcriptSegments = [];
-      let transcriptQualityLevel = 'medium';
-      let transcriptQualityReasons: string[] = [];
-      let track = null;
+      let requestTranscript: any = null;
       
       if (externalTranscript && externalTranscript.segments && externalTranscript.segments.length > 0) {
-        transcriptSegments = externalTranscript.segments;
-        transcriptQualityLevel = externalTranscript.quality?.level || 'medium';
-        transcriptQualityReasons = externalTranscript.quality?.reasons || [];
-        track = { 
-          languageCode: externalTranscript.selectedTrack?.languageCode || 'tr', 
+        requestTranscript = {
+          languageCode: externalTranscript.selectedTrack?.languageCode || 'tr',
           sourceType: externalTranscript.selectedTrack?.sourceType || 'unknown',
-          baseUrl: ''
-        } as any;
+          qualityLevel: externalTranscript.quality?.level || 'medium',
+          qualityReasons: externalTranscript.quality?.reasons || [],
+          segments: externalTranscript.segments,
+        };
+        setCurrentTranscript(externalTranscript.segments);
       } else {
         const provider = new YouTubeTranscriptProvider();
         const tracks = await provider.getAvailableTracks(videoId);
         
         const preferredLang = selectedLanguage.includes('tr') ? 'tr' : 'en';
-        track = tracks.find(t => t.languageCode === preferredLang && t.sourceType === 'manual');
+        let track = tracks.find(t => t.languageCode === preferredLang && t.sourceType === 'manual');
         if (!track) track = tracks.find(t => t.languageCode === preferredLang);
         if (!track) track = tracks.find(t => t.sourceType === 'manual');
         if (!track) track = tracks[0];
         
         const transcriptResult = await provider.fetchTranscript(videoId, track);
-        transcriptSegments = transcriptResult.segments;
-        transcriptQualityLevel = transcriptResult.quality?.level || 'medium';
-        transcriptQualityReasons = transcriptResult.quality?.reasons || [];
+        requestTranscript = {
+          languageCode: track?.languageCode || 'tr',
+          sourceType: track?.sourceType || 'unknown',
+          qualityLevel: transcriptResult.quality?.level || 'medium',
+          qualityReasons: transcriptResult.quality?.reasons || [],
+          segments: transcriptResult.segments,
+        };
+        setCurrentTranscript(transcriptResult.segments);
       }
-      
-      setCurrentTranscript(transcriptSegments);
 
       const request: SummaryRequest = {
         taskId: `task_${Date.now()}`,
         video: { videoId, title, url },
-        transcript: {
-          languageCode: track?.languageCode || 'tr',
-          sourceType: track?.sourceType || 'unknown',
-          qualityLevel: transcriptQualityLevel as any,
-          qualityReasons: transcriptQualityReasons,
-          segments: transcriptSegments,
-        },
+        transcript: requestTranscript,
         options: {
           length: selectedLength,
           outputLanguage: selectedLanguage,
