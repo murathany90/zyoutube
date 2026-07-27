@@ -34,6 +34,8 @@ export interface AIProviderConfig {
   isSessionStorage?: boolean;
   responseMode?: 'markdown' | 'json';
   enableReasoning?: boolean;
+  correctionJsonMode?: boolean;
+  correctionMaxTokens?: number;
 }
 
 export interface ExtensionSettings {
@@ -58,9 +60,14 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
       baseUrl: 'https://api.deepseek.com/v1',
       timeoutMs: 180000,
       correctionTimeoutMs: 600000,
-      temperature: 0.7,
+      temperature: 0.1,
+      maxTokens: 4000,
       contextWindowTokens: 130000,
-      isSessionStorage: false
+      isSessionStorage: false,
+      responseMode: 'markdown',
+      enableReasoning: false,
+      correctionJsonMode: true,
+      correctionMaxTokens: 32000
     },
     'chrome-local': {
       id: 'chrome-local'

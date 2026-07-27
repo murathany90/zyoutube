@@ -404,6 +404,17 @@ const Popup = () => {
                     placeholder="130000"
                   />
                 </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Düzeltme çıktı token limiti</label>
+                  <input type="number" style={inputStyle}
+                    value={draftProvider?.correctionMaxTokens ?? 32000}
+                    onChange={e => {
+                      const val = parseInt(e.target.value);
+                      updateProviderDraft({ correctionMaxTokens: isNaN(val) ? 32000 : val });
+                    }}
+                    placeholder="32000"
+                  />
+                </div>
               </div>
               <Toggle label="Yalnızca oturum boyunca sakla"
                 checked={draftProvider?.isSessionStorage || false}
@@ -412,6 +423,10 @@ const Popup = () => {
               <Toggle label="Akıl Yürütme (Reasoning) Aktif"
                 checked={draftProvider?.enableReasoning || false}
                 onChange={v => updateProviderDraft({ enableReasoning: v })}
+              />
+              <Toggle label="Düzeltmede JSON Response Format (Önerilen)"
+                checked={draftProvider?.correctionJsonMode !== false}
+                onChange={v => updateProviderDraft({ correctionJsonMode: v })}
               />
               
               <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>

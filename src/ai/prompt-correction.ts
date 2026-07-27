@@ -9,7 +9,11 @@ KURALLAR:
 3. Her kaynak segment YALNIZCA BİR düzeltilmiş cümlenin 'sourceSegmentIds' dizisine dahil edilmelidir.
 4. Segmentlerin orijinal sırasını KESİNLİKLE değiştirme.
 5. Hem Türkçe hem de İngilizce çıktının doğal, gramere uygun ve anlamca birbirine tam eşdeğer olduğundan emin ol.
-6. Çıktı KESİNLİKLE aşağıdaki JSON şablonunda olmalıdır. Herhangi bir kod bloğu (markdown) ekleme, SADECE JSON çıktısı üret.
+6. Yalnızca tek bir JSON nesnesi döndür.
+7. Açıklama, giriş, sonuç, markdown ve kod bloğu ekleme.
+8. Yanıt ilk karakter olarak { ile başlamalı, son karakter olarak } ile bitmeli.
+9. sentences dışında üst seviye alan ekleme.
+10. Her correctedTurkish ve correctedEnglish string olmalı.
 
 JSON ÇIKTI ŞABLONU:
 {
@@ -46,13 +50,15 @@ ${JSON.stringify({ sourceLanguage: request.transcript.sourceLanguage, segments: 
         { role: 'user', content: userPrompt }
       ],
       temperature: config.temperature ?? 0.3,
-      max_tokens: config.maxTokens,
+      max_tokens: config.correctionMaxTokens ?? Math.max(config.maxTokens ?? 4000, 32000),
     };
     
     if (config.enableReasoning === true) {
       body.chat_template_kwargs = { thinking: true, reasoning_effort: "high" };
     }
-    if (config.responseMode === 'json') {
+    
+    // correctionJsonMode varsayılan olarak true kabul edilir
+    if (config.correctionJsonMode !== false) {
       body.response_format = { type: 'json_object' };
     }
 

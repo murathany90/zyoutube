@@ -337,12 +337,41 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
        throw new Error("Geçersiz API yanıtı (message nesnesi eksik).");
     }
     
-    aiResponseText = messageObj.content || messageObj.reasoning_content || '';
-    if (!aiResponseText || aiResponseText.trim() === '') {
-      throw new Error("EMPTY_API_RESPONSE: API yanıtı içerik barındırmıyor.");
+    // Güvenli içerik çıkarma
+    if (typeof messageObj.content === 'string') {
+      aiResponseText = messageObj.content;
+    } else if (Array.isArray(messageObj.content)) {
+      aiResponseText = messageObj.content.map((part: any) => part.text || part.content || '').join('');
     }
-    if (data.choices[0].finish_reason === 'content_filter') {
+
+    const reasoningContent = messageObj.reasoning_content || '';
+    const finishReason = data.choices[0].finish_reason;
+    
+    // Loglama
+    let logMessage = `[API Task] Correction Response Info:\n` +
+      `- finish_reason: ${finishReason}\n` +
+      `- content type: ${typeof messageObj.content}\n` +
+      `- content length: ${aiResponseText.length}\n` +
+      `- reasoning_content length: ${reasoningContent.length}`;
+      
+    if (import.meta.env.DEV) {
+      logMessage += `\n- preview: ${aiResponseText.substring(0, 300).replace(/\n/g, ' ')}...`;
+    }
+    
+    console.log(logMessage);
+
+    if (finishReason === 'length') {
+      throw new Error("Düzeltme cevabı çıktı token sınırında kesildi. API ayarlarındaki \"Düzeltme çıktı token limiti\" değerini artırın.");
+    }
+    if (finishReason === 'content_filter') {
        throw new Error("İçerik filtrelemesi nedeniyle yanıt alınamadı.");
+    }
+    
+    if (!aiResponseText || aiResponseText.trim() === '') {
+      if (reasoningContent && reasoningContent.trim() !== '') {
+        throw new Error("Model yalnızca akıl yürütme içeriği döndürdü; nihai JSON cevap bulunamadı.");
+      }
+      throw new Error("EMPTY_API_RESPONSE: API yanıtı içerik barındırmıyor.");
     }
 
     chrome.runtime.sendMessage({
@@ -354,7 +383,7 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
       elapsedMs: Math.round(performance.now() - startedAt)
     }).catch(console.error);
 
-    const sentences = CorrectionResponseParser.parse(aiResponseText);
+    const sentences = CorrectionResponseParser.parse(aiResponseText, finishReason);
     const enrichedSentences = CorrectionResponseParser.enrichCorrectedSentences(
       sentences,
       request.transcript.segments,
