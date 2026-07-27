@@ -320,6 +320,24 @@ const Popup = () => {
               <Toggle label="Her videoda yeni sohbet başlat" checked={gemSettings.newChatPerVideo} onChange={v => saveGem({ ...gemSettings, newChatPerVideo: v })} />
               <Toggle label="Transkripti panoya da kopyala" checked={gemSettings.copyToClipboard} onChange={v => saveGem({ ...gemSettings, copyToClipboard: v })} />
               <Toggle label="Uzun transkriptte parçalara ayır" checked={gemSettings.chunkLongTranscripts} onChange={v => saveGem({ ...gemSettings, chunkLongTranscripts: v })} />
+              <div style={{ marginTop: '10px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Gemini yanıt zaman aşımı (ms)</label>
+                <input type="number" style={inputStyle}
+                  value={gemSettings.responseTimeoutMs ?? 600000}
+                  onChange={e => {
+                    const val = parseInt(e.target.value);
+                    if (isNaN(val)) {
+                      saveGem({ ...gemSettings, responseTimeoutMs: 600000 });
+                    } else {
+                      saveGem({ ...gemSettings, responseTimeoutMs: Math.min(1800000, Math.max(120000, val)) });
+                    }
+                  }}
+                  min={120000}
+                  max={1800000}
+                  placeholder="600000"
+                />
+                <p style={{ color: '#9ca3af', fontSize: '11px', marginTop: '4px' }}>Varsayılan 10 dakika (600000). Geçerli aralık 120000–1800000.</p>
+              </div>
             </div>
 
             <div style={sectionTitle}>Durum</div>

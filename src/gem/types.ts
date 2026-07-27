@@ -14,6 +14,7 @@ export interface GemSettings {
   newChatPerVideo: boolean;
   copyToClipboard: boolean;
   chunkLongTranscripts: boolean;
+  responseTimeoutMs: number;
 }
 
 export const DEFAULT_GEM_SETTINGS: GemSettings = {
@@ -24,6 +25,7 @@ export const DEFAULT_GEM_SETTINGS: GemSettings = {
   newChatPerVideo: true,
   copyToClipboard: true,
   chunkLongTranscripts: true,
+  responseTimeoutMs: 600000,
 };
 
 export type GemStatus =
@@ -67,6 +69,7 @@ export interface GemAutomationRequest {
   gemUrl: string;
   prompt: string;
   maxPromptLength: number;
+  timeoutMs?: number;
 }
 
 export interface GemAutomationResponse {

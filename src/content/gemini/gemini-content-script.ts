@@ -154,24 +154,66 @@ function isLoginPage(): boolean {
     !!document.querySelector('input[type="email"], input[type="password"]');
 }
 
+interface BaselineState {
+  modelTurnCount: number;
+  lastResponseText: string;
+  lastResponseElement: HTMLElement | null;
+}
+
+function captureResponseState(): BaselineState {
+  const modelContainers = document.querySelectorAll(
+    '[data-message-author-role="model"], ' +
+    'message-content[data-message-author-role="model"], ' +
+    '.model-response-text, ' +
+    'model-message'
+  );
+  
+  const lastElement = modelContainers.length > 0 ? modelContainers[modelContainers.length - 1] as HTMLElement : null;
+  const lastText = lastElement ? (lastElement.innerText?.trim() || lastElement.textContent?.trim() || '') : '';
+  
+  return {
+    modelTurnCount: modelContainers.length,
+    lastResponseText: lastText,
+    lastResponseElement: lastElement
+  };
+}
+
 function isStreamingActive(): boolean {
   // Streaming göstergesi kontrolü (genişletilmiş)
   const stopBtn = document.querySelector(
-    '[aria-label*="Stop" i], [aria-label*="Durdur" i], ' +
+    '[aria-label*="Stop" i], [aria-label*="Durdur" i], [aria-label*="cancel" i], [aria-label*="yanıtı durdur" i], ' +
     'button[data-testid*="stop" i]'
   );
-  if (stopBtn) return true;
+  if (stopBtn) {
+    const rect = (stopBtn as HTMLElement).getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) return true;
+  }
+
+  const matIcons = document.querySelectorAll('mat-icon');
+  for (const icon of matIcons) {
+    const text = icon.textContent?.toLowerCase() || '';
+    if (text.includes('stop') || text.includes('cancel')) {
+      const rect = (icon as HTMLElement).getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) return true;
+    }
+  }
 
   // Loading spinner
-  const spinner = document.querySelector(
-    '.loading-indicator, .typing-indicator, [role="progressbar"], ' +
-    '.response-streaming, [data-is-streaming="true"]'
+  const spinners = document.querySelectorAll(
+    '.loading-indicator, .typing-indicator, [role="progressbar"], [aria-busy="true"], ' +
+    '.response-streaming, [data-is-streaming="true"], .streaming-response'
   );
-  if (spinner) return true;
+  for (const spinner of spinners) {
+    const rect = (spinner as HTMLElement).getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) return true;
+  }
 
   // Gemini animasyonlu nokta göstergesi
-  const dots = document.querySelector('.thinking-indicator, .dot-animation, .loading-dots');
-  if (dots) return true;
+  const dotsList = document.querySelectorAll('.thinking-indicator, .dot-animation, .loading-dots');
+  for (const dots of dotsList) {
+    const rect = (dots as HTMLElement).getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) return true;
+  }
 
   return false;
 }
@@ -180,38 +222,156 @@ function isStreamingActive(): boolean {
  * Yanıtın tamamlanmasını bekle.
  * Birden fazla sinyale dayanır: streaming durumu, DOM kararlılığı.
  */
-async function waitForResponse(timeoutMs: number = 120000): Promise<string | null> {
+async function waitForResponse(options: { baseline: BaselineState; timeoutMs: number }): Promise<{ completed: boolean; text: string; diagnostics?: any } | { timeout: true; partialText: string; diagnostics?: any }> {
+  const { baseline, timeoutMs } = options;
   const startTime = Date.now();
   
-  // İstek üzerine tam olarak bu mantık: "4 saniye beklesin"
-  await new Promise(r => setTimeout(r, 4000));
-
-  let lastContent = '';
-  const CHECK_INTERVAL = 3000; // "her 3 saniyede bir kontrol etsin"
-
-  while (Date.now() - startTime < timeoutMs) {
-    const streaming = isStreamingActive();
-    const currentContent = getLatestResponse() || '';
-
-    // "bitirmişmi cevabı"
-    // (Metin uzunluğu 50'den büyükse ve artık streaming bittiyse VEYA metin hiç değişmiyorsa)
-    if (currentContent.length > 50) {
-      if (!streaming || currentContent === lastContent) {
-        // "sonra hemen eklenti özet kartına yazsın" (Anında return et)
-        return currentContent;
+  let generationStarted = false;
+  let lastText = '';
+  let lastChangeAt = Date.now();
+  let stablePollCount = 0;
+  let notStreamingPollCount = 0;
+  
+  // Observer setup
+  const conversationArea = document.querySelector('.conversation-container, .chat-history, main') || document.body;
+  const observer = new MutationObserver((mutations) => {
+    let changed = false;
+    for (const m of mutations) {
+      if (m.type === 'childList' || m.type === 'characterData') {
+        changed = true; break;
       }
     }
+    if (changed) {
+      const currentText = getLatestResponse() || '';
+      if (currentText !== lastText) {
+        lastChangeAt = Date.now();
+      }
+    }
+  });
+  
+  observer.observe(conversationArea, { childList: true, subtree: true, characterData: true });
 
-    lastContent = currentContent;
-    await new Promise(r => setTimeout(r, CHECK_INTERVAL));
+  const CHECK_INTERVAL = 2000;
+
+  try {
+    while (Date.now() - startTime < timeoutMs) {
+      const streaming = isStreamingActive();
+      const currentContent = getLatestResponse() || '';
+      
+      const modelContainers = document.querySelectorAll(
+        '[data-message-author-role="model"], ' +
+        'message-content[data-message-author-role="model"], ' +
+        '.model-response-text, ' +
+        'model-message'
+      );
+      
+      const currentElement = modelContainers.length > 0 ? modelContainers[modelContainers.length - 1] as HTMLElement : null;
+      
+      if (!generationStarted) {
+        if (modelContainers.length > baseline.modelTurnCount || currentElement !== baseline.lastResponseElement || (currentContent.length > 10 && currentContent !== baseline.lastResponseText)) {
+          generationStarted = true;
+          console.log('[ZYouTube Gemini] Generation started');
+        }
+      }
+
+      if (currentContent !== lastText) {
+        lastText = currentContent;
+        lastChangeAt = Date.now();
+        stablePollCount = 0;
+      } else {
+        stablePollCount++;
+      }
+      
+      if (!streaming) {
+        notStreamingPollCount++;
+      } else {
+        notStreamingPollCount = 0;
+      }
+
+      const elapsedMs = Date.now() - startTime;
+      const stableForMs = Date.now() - lastChangeAt;
+      const responseCharacters = currentContent.length;
+
+      // Report progress to background
+      chrome.runtime.sendMessage({
+        type: 'GEMINI_PROGRESS',
+        payload: {
+          status: 'waiting_response',
+          message: 'Gemini yanıt üretiyor…',
+          elapsedMs,
+          responseCharacters,
+          streamingActive: streaming,
+          stableForMs
+        }
+      }).catch(() => {});
+      
+      console.log(`[ZYouTube Gemini] Response progress { elapsedMs: ${elapsedMs}, responseCharacters: ${responseCharacters}, streamingActive: ${streaming}, stableForMs: ${stableForMs} }`);
+
+      // Completion conditions
+      if (
+        generationStarted &&
+        responseCharacters >= 50 &&
+        stableForMs >= 12000 &&
+        stablePollCount >= 4 &&
+        notStreamingPollCount >= 3 &&
+        currentElement && document.body.contains(currentElement)
+      ) {
+        console.log(`[ZYouTube Gemini] Response completed { elapsedMs: ${elapsedMs}, responseCharacters: ${responseCharacters}, stableForMs: ${stableForMs} }`);
+        return {
+          completed: true,
+          text: currentContent,
+          diagnostics: {
+            generationStarted,
+            stableForMs,
+            stablePollCount,
+            notStreamingPollCount,
+            elapsedMs,
+            responseCharacters
+          }
+        };
+      }
+
+      await new Promise(r => setTimeout(r, CHECK_INTERVAL));
+    }
+
+    // Timeout
+    const elapsedMs = Date.now() - startTime;
+    console.log(`[ZYouTube Gemini] Response timeout { elapsedMs: ${elapsedMs}, partialCharacters: ${lastText.length} }`);
+    return {
+      timeout: true,
+      partialText: lastText,
+      diagnostics: {
+        generationStarted,
+        stableForMs: Date.now() - lastChangeAt,
+        stablePollCount,
+        notStreamingPollCount,
+        elapsedMs,
+        responseCharacters: lastText.length
+      }
+    };
+  } finally {
+    observer.disconnect();
   }
-
-  const finalContent = getLatestResponse();
-  return finalContent && finalContent.length > 50 ? finalContent : null;
 }
 
 // Mesaj dinleyici
-chrome.runtime.onMessage.addListener((message: GemAutomationRequest, sender, sendResponse) => {
+declare global {
+  interface Window {
+    __ZYOUTUBE_GEMINI_AUTOMATION_LOADED__?: boolean;
+  }
+}
+
+if (!window.__ZYOUTUBE_GEMINI_AUTOMATION_LOADED__) {
+  window.__ZYOUTUBE_GEMINI_AUTOMATION_LOADED__ = true;
+  registerGeminiMessageListener();
+}
+
+function registerGeminiMessageListener() {
+  chrome.runtime.onMessage.addListener((message: GemAutomationRequest | any, sender, sendResponse) => {
+    if (message.type === 'GEM_AUTOMATION_PING') {
+      sendResponse({ success: true, version: 2 });
+      return true;
+    }
   if (message.type !== 'GEM_AUTOMATE') return;
 
   // Güvenlik: Yalnızca eklentinin kendi mesajlarını kabul et
@@ -314,6 +474,7 @@ chrome.runtime.onMessage.addListener((message: GemAutomationRequest, sender, sen
         return tc.length > 10 || val.length > 10;
       };
 
+      const baseline = captureResponseState();
       // İlk deneme: Metni yerleştir
       insertTextIntoInput(input, message.prompt);
       await new Promise(r => setTimeout(r, 800));
@@ -362,11 +523,17 @@ chrome.runtime.onMessage.addListener((message: GemAutomationRequest, sender, sen
       }
 
       // Yanıt bekle
-      const response = await waitForResponse(120000);
-      if (response) {
-        sendResponse({ success: true, text: response });
+      const response = await waitForResponse({
+        baseline,
+        timeoutMs: message.timeoutMs || 600000
+      });
+      
+      if ('completed' in response && response.completed) {
+        sendResponse({ success: true, completed: true, text: response.text, diagnostics: response.diagnostics });
+      } else if ('timeout' in response && response.timeout) {
+        sendResponse({ success: false, completed: false, partialText: response.partialText, error: 'Gemini yanıtı belirtilen sürede tamamlanmadı.', diagnostics: response.diagnostics });
       } else {
-        sendResponse({ success: false, error: 'Yanıt alınamadı veya zaman aşımı.' });
+        sendResponse({ success: false, error: 'Bilinmeyen yanıt hatası.' });
       }
     } catch (e: any) {
       sendResponse({ success: false, error: e.message || 'Otomasyon hatası.' });
@@ -374,6 +541,7 @@ chrome.runtime.onMessage.addListener((message: GemAutomationRequest, sender, sen
   })();
 
   return true; // Async response
-});
+  });
+}
 
 console.log('[ZYouTube] Gemini content script loaded.');

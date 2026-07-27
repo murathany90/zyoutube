@@ -113,6 +113,14 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', cur
         setStatus(message.status);
         if (message.message) setProgressMessage(message.message);
         startHeartbeatTimer();
+      } else if (message.type === 'GEMINI_PROGRESS') {
+        const p = message.payload;
+        setStatus(p.status);
+        const mins = Math.floor(p.elapsedMs / 60000);
+        const secs = Math.floor((p.elapsedMs % 60000) / 1000);
+        const timeStr = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        setProgressMessage(`${p.message}\nGeçen süre: ${timeStr}\nAlınan metin: ${p.responseCharacters.toLocaleString('tr-TR')} karakter`);
+        startHeartbeatTimer();
       } else if (message.type === 'API_SUMMARY_HEARTBEAT' || message.type === 'API_SUMMARY_ACCEPTED') {
         startHeartbeatTimer();
       } else if (message.type === 'SUMMARY_COMPLETED') {
@@ -328,7 +336,7 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', cur
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         <div style={{ textAlign: 'center' }}>
           <p style={{ fontWeight: 700, fontSize: '14px', margin: '0 0 4px' }}>İşleniyor</p>
-          <p style={{ fontSize: '12px', color: 'var(--zy-text-muted, #6b7280)' }}>{progressMessage}</p>
+          <p style={{ fontSize: '12px', color: 'var(--zy-text-muted, #6b7280)', whiteSpace: 'pre-wrap' }}>{progressMessage}</p>
         </div>
         <button onClick={cancelSummary}
           style={{

@@ -127,17 +127,31 @@ export class GemController {
 
       if (controller.signal.aborted) throw new Error('AbortError');
 
-      // Content script inject kontrolü
+      // Content script inject kontrolü (Ping ile)
+      let isScriptInjected = false;
       try {
-        await chrome.scripting.executeScript({
-          target: { tabId: tabResult.tabId },
-          files: ['src/content/gemini/gemini-content-script.ts'],
-        });
-      } catch {
-        // Zaten inject edilmişse veya hata olursa devam et
+        const pingResponse = await chrome.tabs.sendMessage(tabResult.tabId, { type: 'GEM_AUTOMATION_PING' });
+        if (pingResponse && pingResponse.success) {
+          isScriptInjected = true;
+        }
+      } catch (e) {
+        // Beklenen durum: script henüz inject edilmemiş
       }
 
-
+      if (!isScriptInjected) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tabResult.tabId },
+            files: ['src/content/gemini/gemini-content-script.ts'],
+          });
+          // Hazır olmasını bekle ve doğrula
+          await new Promise(r => setTimeout(r, 500));
+          await chrome.tabs.sendMessage(tabResult.tabId, { type: 'GEM_AUTOMATION_PING' });
+        } catch (e) {
+          this.emitStatus(request.taskId, 'automation_failed', 'Content script başlatılamadı.');
+          return this.fallback(request.taskId, prompt, gemSettings);
+        }
+      }
 
       // 7. Content script ile otomasyon
       this.emitStatus(request.taskId, 'sending_message', 'Prompt gönderiliyor...');
@@ -150,13 +164,20 @@ export class GemController {
           gemUrl: gemSettings.gemUrl,
           prompt: prompt,
           maxPromptLength: 1000000,
+          timeoutMs: gemSettings.responseTimeoutMs || 600000,
         };
 
         this.emitStatus(request.taskId, 'waiting_response', 'Yanıt bekleniyor...');
         const response = await chrome.tabs.sendMessage(tabResult.tabId, automationRequest);
 
-        if (response?.success) {
+        if (
+          response?.success === true &&
+          response?.completed === true &&
+          typeof response.text === 'string' &&
+          response.text.trim().length > 50
+        ) {
           this.emitStatus(request.taskId, 'response_received', 'Yanıt alındı.');
+          await new Promise(r => setTimeout(r, 1500)); // Son kez sekmenin varlığını doğrulamak ve bekleme payı bırakmak
           await GemTabManager.maybeCloseTab(tabResult.tabId, tabResult.isNew, gemSettings);
           return {
             success: true,
