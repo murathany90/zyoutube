@@ -293,6 +293,17 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
     const body = CorrectionPromptBuilder.buildApiRequestBody(request, config);
 
     console.log(`[API Task] correction POST started`);
+    
+    const inputChars = JSON.stringify(body).length;
+    console.log(`[Correction Request]
+segmentCount: ${request.transcript.segments.length}
+inputCharacters: ${inputChars}
+estimatedInputTokens: ${Math.round(inputChars / 4)}
+maxOutputTokens: ${body.max_tokens}
+streaming: ${body.stream || false}
+reasoningEnabled: ${config.correctionEnableReasoning || false}
+model: ${body.model}`);
+
     chrome.runtime.sendMessage({
       type: 'API_CORRECTION_PROGRESS',
       taskId,
@@ -318,6 +329,13 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
     console.log(`[API Task] correction HTTP status: ${response.status}`);
 
     if (!response.ok) {
+      if (response.status === 504) {
+        throw new Error(
+          "API sağlayıcısı düzeltme isteğini zamanında tamamlayamadı (504). " +
+          "Bu eklenti timeout'u değildir. Streaming açık ve düzeltme reasoning " +
+          "kapalı olarak tekrar deneyin."
+        );
+      }
       let errorMsg = response.statusText;
       try {
         const rawText = await response.text();
@@ -328,29 +346,82 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
     }
 
     let aiResponseText = '';
-    const data = await response.json();
-    if (!data.choices || !data.choices[0]) {
-       throw new Error("Geçersiz API yanıtı (choices dizisi boş).");
-    }
-    const messageObj = data.choices[0].message;
-    if (!messageObj) {
-       throw new Error("Geçersiz API yanıtı (message nesnesi eksik).");
-    }
-    
-    // Güvenli içerik çıkarma
-    if (typeof messageObj.content === 'string') {
-      aiResponseText = messageObj.content;
-    } else if (Array.isArray(messageObj.content)) {
-      aiResponseText = messageObj.content.map((part: any) => part.text || part.content || '').join('');
-    }
+    let finishReason = '';
+    let reasoningContent = '';
+    let contentType = 'string';
 
-    const reasoningContent = messageObj.reasoning_content || '';
-    const finishReason = data.choices[0].finish_reason;
-    
+    if (body.stream && response.body) {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      
+      let lastProgressTime = performance.now();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data: ')) continue;
+          const dataStr = trimmed.slice(6);
+          if (dataStr === '[DONE]') continue;
+          
+          try {
+            const data = JSON.parse(dataStr);
+            const content = data.choices?.[0]?.delta?.content;
+            if (content) {
+              aiResponseText += content;
+            }
+            if (data.choices?.[0]?.finish_reason) {
+              finishReason = data.choices[0].finish_reason;
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+        
+        const now = performance.now();
+        if (now - lastProgressTime >= 10000) {
+          lastProgressTime = now;
+          chrome.runtime.sendMessage({
+            type: 'API_CORRECTION_PROGRESS',
+            taskId,
+            videoId,
+            stage: 'streaming',
+            message: `Yanıt alınıyor... ${aiResponseText.length} karakter`,
+            elapsedMs: Math.round(performance.now() - startedAt)
+          }).catch(console.error);
+        }
+      }
+    } else {
+      const data = await response.json();
+      if (!data.choices || !data.choices[0]) {
+         throw new Error("Geçersiz API yanıtı (choices dizisi boş).");
+      }
+      const messageObj = data.choices[0].message;
+      if (!messageObj) {
+         throw new Error("Geçersiz API yanıtı (message nesnesi eksik).");
+      }
+      
+      contentType = typeof messageObj.content;
+      if (typeof messageObj.content === 'string') {
+        aiResponseText = messageObj.content;
+      } else if (Array.isArray(messageObj.content)) {
+        aiResponseText = messageObj.content.map((part: any) => part.text || part.content || '').join('');
+      }
+
+      reasoningContent = messageObj.reasoning_content || '';
+      finishReason = data.choices[0].finish_reason;
+    }
     // Loglama
     let logMessage = `[API Task] Correction Response Info:\n` +
       `- finish_reason: ${finishReason}\n` +
-      `- content type: ${typeof messageObj.content}\n` +
+      `- content type: ${contentType}\n` +
       `- content length: ${aiResponseText.length}\n` +
       `- reasoning_content length: ${reasoningContent.length}`;
       

@@ -36,6 +36,8 @@ export interface AIProviderConfig {
   enableReasoning?: boolean;
   correctionJsonMode?: boolean;
   correctionMaxTokens?: number;
+  correctionStreaming?: boolean;
+  correctionEnableReasoning?: boolean;
 }
 
 export interface ExtensionSettings {
@@ -67,7 +69,9 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
       responseMode: 'markdown',
       enableReasoning: false,
       correctionJsonMode: true,
-      correctionMaxTokens: 32000
+      correctionMaxTokens: 32000,
+      correctionStreaming: true,
+      correctionEnableReasoning: false
     },
     'chrome-local': {
       id: 'chrome-local'

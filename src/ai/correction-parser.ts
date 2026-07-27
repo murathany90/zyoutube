@@ -110,27 +110,53 @@ export class CorrectionResponseParser {
 
     try {
       const sentences: CorrectedBilingualSentence[] = data.sentences.map((s: any, index: number) => {
-        if (!s.sourceSegmentIds || !Array.isArray(s.sourceSegmentIds) || s.sourceSegmentIds.length === 0) {
-           throw new Error(`Cümle ${index} eksik veya boş sourceSegmentIds içeriyor.`);
+        let segmentIds: string[] = [];
+        let fromIdx: number | undefined;
+        let toIdx: number | undefined;
+
+        if (s.sourceSegmentIds && Array.isArray(s.sourceSegmentIds)) {
+           if (s.sourceSegmentIds.length === 0) {
+             throw new Error(`Cümle ${index} eksik veya boş sourceSegmentIds içeriyor.`);
+           }
+           if (!s.sourceSegmentIds.every((id: any) => typeof id === 'string')) {
+             throw new Error(`Cümle ${index} sourceSegmentIds dizisi string olmayan öğeler içeriyor.`);
+           }
+           segmentIds = s.sourceSegmentIds;
+        } else if (typeof s.from === 'number' && typeof s.to === 'number') {
+           if (s.from < 0 || s.to < s.from) {
+             throw new Error(`Cümle ${index} geçersiz from/to aralığı içeriyor: ${s.from}-${s.to}`);
+           }
+           if (index === 0 && s.from !== 0) {
+             throw new Error(`İlk cümle from: 0 ile başlamalıdır. Gelen: ${s.from}`);
+           }
+           fromIdx = s.from;
+           toIdx = s.to;
+        } else {
+           throw new Error(`Cümle ${index} eksik from/to veya sourceSegmentIds içeriyor.`);
         }
-        if (!s.sourceSegmentIds.every((id: any) => typeof id === 'string')) {
-           throw new Error(`Cümle ${index} sourceSegmentIds dizisi string olmayan öğeler içeriyor.`);
+
+        if (typeof s.tr === 'string' && s.tr.trim() !== '') {
+          s.correctedTurkish = s.tr;
         }
+        if (typeof s.en === 'string' && s.en.trim() !== '') {
+          s.correctedEnglish = s.en;
+        }
+
         if (typeof s.correctedTurkish !== 'string' || s.correctedTurkish.trim() === '') {
-           throw new Error(`Cümle ${index} eksik veya boş correctedTurkish içeriyor.`);
+           throw new Error(`Cümle ${index} eksik veya boş correctedTurkish/tr içeriyor.`);
         }
         if (typeof s.correctedEnglish !== 'string' || s.correctedEnglish.trim() === '') {
-           throw new Error(`Cümle ${index} eksik veya boş correctedEnglish içeriyor.`);
+           throw new Error(`Cümle ${index} eksik veya boş correctedEnglish/en içeriyor.`);
         }
         
         const rawConfidence = Number(s.confidence);
         const confidence = Number.isFinite(rawConfidence) ? Math.max(0, Math.min(1, rawConfidence)) : 1;
         
-        return {
+        const result: any = {
           id: `corrected-${index}-${Date.now()}`,
           startTimeMs: 0,
           endTimeMs: 0,
-          sourceSegmentIds: s.sourceSegmentIds,
+          sourceSegmentIds: segmentIds,
           originalTurkish: '',
           originalEnglish: '',
           correctedTurkish: s.correctedTurkish,
@@ -138,6 +164,13 @@ export class CorrectionResponseParser {
           sourceLanguage: 'tr',
           confidence: confidence
         };
+        
+        if (fromIdx !== undefined && toIdx !== undefined) {
+          result._from = fromIdx;
+          result._to = toIdx;
+        }
+        
+        return result as CorrectedBilingualSentence;
       });
 
       return sentences;
@@ -165,7 +198,19 @@ export class CorrectionResponseParser {
     // Create segment map for fast lookup
     const segmentMap = new Map(sourceSegments.map((s, idx) => [s.id, { ...s, index: idx }]));
 
-    const enriched = apiSentences.map((sentence) => {
+    const enriched = apiSentences.map((sentenceAny: any) => {
+      const sentence = sentenceAny as CorrectedBilingualSentence & { _from?: number; _to?: number };
+      
+      if (typeof sentence._from === 'number' && typeof sentence._to === 'number') {
+        if (sentence._from !== lastSegmentIndex + 1) {
+           throw new Error(`Cümlelerin arası kopuk veya sırası bozuk. Beklenen from: ${lastSegmentIndex + 1}, Gelen: ${sentence._from}`);
+        }
+        if (sentence._to >= sourceSegments.length) {
+           throw new Error(`'to' değeri segment sayısından büyük: ${sentence._to}`);
+        }
+        sentence.sourceSegmentIds = sourceSegments.slice(sentence._from, sentence._to + 1).map(s => s.id);
+      }
+
       let minStart = Infinity;
       let maxEnd = -Infinity;
       const trParts: string[] = [];
@@ -219,6 +264,10 @@ export class CorrectionResponseParser {
 
     if (missingSegments.length > 0 || repeatedSegments.length > 0) {
       throw new Error(`Düzeltme sonucu geçersiz: ${missingSegments.length} kaynak segment eksik, ${repeatedSegments.length} segment tekrar kullanılmış.`);
+    }
+
+    if (lastSegmentIndex !== sourceSegments.length - 1) {
+      throw new Error(`Düzeltme sonucu geçersiz: Son cümlenin 'to' değeri son segmenti kapsamıyor. Beklenen: ${sourceSegments.length - 1}, Bulunan: ${lastSegmentIndex}`);
     }
 
     return enriched;

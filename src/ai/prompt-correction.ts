@@ -13,15 +13,17 @@ KURALLAR:
 7. Açıklama, giriş, sonuç, markdown ve kod bloğu ekleme.
 8. Yanıt ilk karakter olarak { ile başlamalı, son karakter olarak } ile bitmeli.
 9. sentences dışında üst seviye alan ekleme.
-10. Her correctedTurkish ve correctedEnglish string olmalı.
+10. Girdi segmentleri dizi formatındadır: [index, startTimeMs, endTimeMs, "TR metin", "EN metin"].
+11. Çıktıdaki 'from' ve 'to' değerleri kaynak segmentin indeksini ifade eder. İlk cümlenin 'from' değeri 0 olmalı. Ardışık her cümlenin 'from' değeri bir öncekinin 'to' değerinden bir fazla olmalıdır. Son cümlenin 'to' değeri son giriş segmentinin indeksi olmalıdır. Asla atlama veya geriye dönme yapma.
 
 JSON ÇIKTI ŞABLONU:
 {
   "sentences": [
     {
-      "sourceSegmentIds": ["segment-1", "segment-2", "segment-3"],
-      "correctedTurkish": "Bence bu, sistemin en önemli bölümlerinden biridir.",
-      "correctedEnglish": "I think this is one of the most important parts of the system.",
+      "from": 0,
+      "to": 2,
+      "tr": "Düzeltilmiş Türkçe cümle.",
+      "en": "Corrected English sentence.",
       "confidence": 0.95
     }
   ]
@@ -35,7 +37,7 @@ Kaynak Dil: ${request.transcript.sourceLanguage}
 Lütfen aşağıdaki altyazı segmentlerini analiz et, anlam bütünlüğüne göre cümleler halinde grupla ve istenen JSON formatında döndür.
 
 Segmentler:
-${JSON.stringify({ sourceLanguage: request.transcript.sourceLanguage, segments: request.transcript.segments }, null, 2)}`;
+${JSON.stringify({ sourceLanguage: request.transcript.sourceLanguage, segments: request.transcript.segments.map((s, i) => [i, s.startTimeMs, s.endTimeMs, s.turkish, s.english]) })}`;
   }
 
   static buildApiRequestBody(request: CorrectionRequest, config: any): any {
@@ -53,8 +55,13 @@ ${JSON.stringify({ sourceLanguage: request.transcript.sourceLanguage, segments: 
       max_tokens: config.correctionMaxTokens ?? Math.max(config.maxTokens ?? 4000, 32000),
     };
     
-    if (config.enableReasoning === true) {
+    if (config.correctionEnableReasoning === true) {
       body.chat_template_kwargs = { thinking: true, reasoning_effort: "high" };
+    }
+
+    if (config.correctionStreaming !== false) {
+      body.stream = true;
+      body.stream_options = { include_usage: true };
     }
     
     // correctionJsonMode varsayılan olarak true kabul edilir
