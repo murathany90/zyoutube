@@ -49,6 +49,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
   const [displayLanguage, setDisplayLanguage] = useState<'tr' | 'en' | 'both'>('tr');
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [showTimestamps, setShowTimestamps] = useState(true);
+  const [reloadCounter, setReloadCounter] = useState(0);
   
   const providerRef = useRef(new YouTubeTranscriptProvider());
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -62,7 +63,8 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
     const initTracks = async () => {
       setLoading(true);
       setError(null);
-      // Removed setResult(null) as requested by rule 6 (Dil değişimi başarısız olursa eski transkripti koru)
+      setResult(null); // Clear result on video change
+      if (onTranscriptLoaded) onTranscriptLoaded(null);
       setTracks([]);
       setSelectedTrackUrl(''); // Yeni video için url'yi sıfırla
       
@@ -150,35 +152,36 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
              for (let i = 0; i < mergedSegments.length; i++) {
                 const seg = mergedSegments[i];
                 let bestMatch = null;
+                let bestMatchIndex = -1;
                 let bestDiff = Infinity;
                 
-                while (secIndex < resEn.segments.length) {
-                   const enSeg = resEn.segments[secIndex];
-                   // Örtüşme kontrolü (startTimeMs ile endTimeMs arasında)
+                // Önceki, mevcut ve sonraki en fazla üç adayı değerlendir
+                for (let k = 0; k < 3; k++) {
+                   const currIndex = secIndex + k;
+                   if (currIndex >= resEn.segments.length) break;
+                   const enSeg = resEn.segments[currIndex];
+                   
                    const segEnd = seg.startTimeMs + seg.durationMs;
                    const enEnd = enSeg.startTimeMs + enSeg.durationMs;
                    const isOverlap = (enSeg.startTimeMs < segEnd) && (enEnd > seg.startTimeMs);
                    
                    if (isOverlap) {
                       bestMatch = enSeg;
-                      secIndex++;
-                      break;
+                      bestMatchIndex = currIndex;
+                      break; // Önce zaman aralığı örtüşmesini kabul et
                    }
                    
                    const diff = Math.abs(seg.startTimeMs - enSeg.startTimeMs);
-                   if (diff < bestDiff && diff <= 5000) {
+                   if (diff < bestDiff && diff <= 5000) { // 5 saniyeden büyük farkı kabul etme
                       bestDiff = diff;
                       bestMatch = enSeg;
+                      bestMatchIndex = currIndex;
                    }
-                   
-                   if (enSeg.startTimeMs > seg.startTimeMs) {
-                      break;
-                   }
-                   secIndex++;
                 }
                 
-                if (bestMatch) {
+                if (bestMatch && bestMatchIndex >= 0) {
                    seg.secondaryText = bestMatch.cleanText;
+                   secIndex = bestMatchIndex + 1; // aynı secondary segment tekrar kullanılmasın
                 }
              }
           }
@@ -212,7 +215,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       active = false;
       if (abortControllerRef.current) abortControllerRef.current.abort();
     };
-  }, [selectedTrackUrl, videoId, tracks, displayLanguage]);
+  }, [selectedTrackUrl, videoId, tracks, displayLanguage, reloadCounter]);
 
   // 3. Track video time
   useEffect(() => {
@@ -275,7 +278,15 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
 
   // 4. Auto-sync scroll
   useEffect(() => {
-    if (autoSync && activeSegmentRef.current && containerRef.current && !searchQuery) {
+    if (!autoSync || searchQuery || !result) return;
+    
+    const activeIndex = filteredSegments.findIndex(s => s.id === activeSegmentId);
+    if (activeIndex >= 0 && activeIndex >= visibleCount - 30) {
+       setVisibleCount(current => Math.max(current, activeIndex + 30));
+       return;
+    }
+    
+    if (activeSegmentRef.current && containerRef.current) {
        const container = containerRef.current;
        const activeEl = activeSegmentRef.current;
        const targetTop = activeEl.offsetTop - container.clientHeight / 2 + activeEl.clientHeight / 2;
@@ -284,14 +295,6 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
          top: Math.max(0, targetTop),
          behavior: 'smooth'
        });
-       
-       // Otomatik takipte visible count'u artır (Fix 3)
-       if (result) {
-         const activeIndex = filteredSegments.findIndex(s => s.id === activeSegmentId);
-         if (activeIndex >= 0 && activeIndex + 30 >= visibleCount) {
-           setVisibleCount(current => Math.max(current, activeIndex + 30));
-         }
-       }
     }
   }, [currentTime, autoSync, searchQuery, activeSegmentId, result, filteredSegments, visibleCount]);
 
@@ -310,7 +313,12 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
   }, [searchQuery, exactMatch, selectedTrackUrl, displayLanguage]);
 
   if (loading && !result) return <div className="p-4 text-sm animate-pulse">Transkript yükleniyor...</div>;
-  if (error) return <div className="p-4 text-sm text-red-500 bg-red-50 dark:bg-red-900/20 rounded">{error}</div>;
+  if (error && !result) return (
+    <div className="p-4 text-sm text-red-500 bg-red-50 dark:bg-red-900/20 rounded h-full flex flex-col items-center justify-center gap-3">
+      <span>{error}</span>
+      <button onClick={() => setReloadCounter(c => c + 1)} className="px-3 py-1 bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200 rounded hover:bg-red-200">Tekrar Dene</button>
+    </div>
+  );
   if (!result) return null;
 
   return (
@@ -381,6 +389,13 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
           </select>
         </div>
       </div>
+      
+      {error && result && (
+        <div className="text-red-600 dark:text-red-400 text-xs p-2 bg-red-50 dark:bg-red-900/20 rounded shrink-0 flex justify-between items-center">
+          <span>⚠️ Yeni dil yüklenemedi. Önceki transkript gösteriliyor.</span>
+          <button onClick={() => setReloadCounter(c => c + 1)} className="underline font-semibold ml-2 text-red-700 dark:text-red-300">Tekrar Dene</button>
+        </div>
+      )}
       
       {result.quality?.level !== 'high' && (result.quality?.reasons?.length || 0) > 0 && (
         <div className="text-yellow-600 dark:text-yellow-400 text-xs p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded shrink-0">

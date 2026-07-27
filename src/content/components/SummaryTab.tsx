@@ -5,10 +5,10 @@ import { AISettingsService } from '../../settings/ai-settings';
 import { SummaryEngine } from '../../gem/types';
 import { sendRuntimeMessage } from '../runtime-messenger';
 import { HistoryService } from '../../settings/history';
-import { TranscriptSegment } from '../../transcript/types';
+import { TranscriptSegment, TranscriptResult } from '../../transcript/types';
 import { renderSimpleMarkdown } from '../../utils/formatters';
 
-export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', currentTranscript: externalTranscript }: { videoId: string; title: string; url: string; activeSection?: 'summary' | 'sonuc' | 'cikarimlar' | 'arastir'; currentTranscript?: any }) => {
+export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', currentTranscript: externalTranscript }: { videoId: string; title: string; url: string; activeSection?: 'summary' | 'sonuc' | 'cikarimlar' | 'arastir'; currentTranscript?: TranscriptResult | null }) => {
   const [status, setStatus] = useState<AITaskStatus>('queued');
   const [progressMessage, setProgressMessage] = useState<string>('');
   const [result, setResult] = useState<SummaryResult | null>(null);
@@ -146,29 +146,30 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', cur
       setStatus('preparing');
       setProgressMessage('Transkript çekiliyor...');
 
-      const provider = new YouTubeTranscriptProvider();
-      const tracks = await provider.getAvailableTracks(videoId);
-      
-      const preferredLang = selectedLanguage.includes('tr') ? 'tr' : 'en';
-      let track = tracks.find(t => t.languageCode === preferredLang && t.sourceType === 'manual');
-      if (!track) track = tracks.find(t => t.languageCode === preferredLang);
-      if (!track) track = tracks.find(t => t.sourceType === 'manual');
-      if (!track) track = tracks[0];
-      
       let transcriptSegments = [];
       let transcriptQualityLevel = 'medium';
-      let transcriptQualityReasons = [];
+      let transcriptQualityReasons: string[] = [];
+      let track = null;
       
       if (externalTranscript && externalTranscript.segments && externalTranscript.segments.length > 0) {
         transcriptSegments = externalTranscript.segments;
         transcriptQualityLevel = externalTranscript.quality?.level || 'medium';
         transcriptQualityReasons = externalTranscript.quality?.reasons || [];
         track = { 
-          languageCode: externalTranscript.languageCode || track.languageCode, 
-          sourceType: externalTranscript.sourceType || track.sourceType || 'unknown',
+          languageCode: externalTranscript.selectedTrack?.languageCode || 'tr', 
+          sourceType: externalTranscript.selectedTrack?.sourceType || 'unknown',
           baseUrl: ''
         } as any;
       } else {
+        const provider = new YouTubeTranscriptProvider();
+        const tracks = await provider.getAvailableTracks(videoId);
+        
+        const preferredLang = selectedLanguage.includes('tr') ? 'tr' : 'en';
+        track = tracks.find(t => t.languageCode === preferredLang && t.sourceType === 'manual');
+        if (!track) track = tracks.find(t => t.languageCode === preferredLang);
+        if (!track) track = tracks.find(t => t.sourceType === 'manual');
+        if (!track) track = tracks[0];
+        
         const transcriptResult = await provider.fetchTranscript(videoId, track);
         transcriptSegments = transcriptResult.segments;
         transcriptQualityLevel = transcriptResult.quality?.level || 'medium';
