@@ -3,6 +3,80 @@ import { ResponseParser } from '../ai/response-parser';
 import { CorrectionPromptBuilder } from '../ai/prompt-correction';
 import { CorrectionResponseParser } from '../ai/correction-parser';
 
+
+export type NormalizedCorrectionError = {
+  name: string;
+  message: string;
+  code: string;
+  stack?: string;
+  diagnostics?: Record<string, unknown>;
+};
+
+export function normalizeUnknownError(
+  value: unknown
+): NormalizedCorrectionError {
+  if (value instanceof Error) {
+    const extended = value as Error & {
+      code?: string;
+      diagnostics?: Record<string, unknown>;
+    };
+
+    return {
+      name: value.name || "Error",
+      message: value.message || "Bilinmeyen hata",
+      code: extended.code || "UNKNOWN_ERROR",
+      stack: value.stack,
+      diagnostics: extended.diagnostics
+    };
+  }
+
+  if (typeof value === "string") {
+    return {
+      name: "NonErrorThrown",
+      message: value,
+      code: "NON_ERROR_THROWN"
+    };
+  }
+
+  try {
+    return {
+      name: "NonErrorThrown",
+      message: JSON.stringify(value),
+      code: "NON_ERROR_THROWN"
+    };
+  } catch {
+    return {
+      name: "NonErrorThrown",
+      message: String(value),
+      code: "NON_ERROR_THROWN"
+    };
+  }
+}
+
+export function createCorrectionError(
+  code: string,
+  message: string,
+  diagnostics?: Record<string, unknown>
+) {
+  const error = new Error(message) as any;
+  error.code = code;
+  if (diagnostics) {
+    error.diagnostics = diagnostics;
+  }
+  return error;
+}
+
+export function classifyCorrectionError(normalized: NormalizedCorrectionError): { stage: string } {
+    let stage = 'unknown';
+    if (normalized.code === 'CORRECTION_HTTP_ERROR' || normalized.code === 'CORRECTION_HTTP_504' || normalized.code.startsWith('HTTP_')) stage = 'http';
+    else if (normalized.code === 'CORRECTION_STREAM_READ_FAILED' || normalized.code.includes('STREAM_')) stage = 'streaming';
+    else if (normalized.code === 'CORRECTION_EMPTY_RESPONSE' || normalized.code === 'CORRECTION_JSON_PARSE_FAILED') stage = 'parsing';
+    else if (['CORRECTION_SCHEMA_INVALID', 'CORRECTION_RANGE_INVALID', 'CORRECTION_LANGUAGE_MISSING', 'CORRECTION_SEGMENT_COVERAGE_INVALID'].includes(normalized.code)) stage = 'validation';
+    else if (normalized.name === 'AbortError' || normalized.message === 'AbortError') normalized.code = 'CORRECTION_CANCELLED';
+    else if (normalized.message === 'Timeout') normalized.code = 'CORRECTION_TIMEOUT';
+    return { stage };
+}
+
 interface TaskContext {
   controller: AbortController;
   heartbeatId: number;
@@ -123,19 +197,24 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
     console.log(`[API Task] HTTP status: ${response.status}`);
 
     if (!response.ok) {
-      let errorMsg = response.statusText;
+      let preview = response.statusText;
+      let contentType = response.headers.get('content-type') || 'unknown';
       try {
         const rawText = await response.text();
-        try {
-          const errorData = JSON.parse(rawText);
-          errorMsg = errorData?.error?.message || errorData?.message || rawText.slice(0, 500);
-        } catch {
-          errorMsg = rawText.slice(0, 500);
+        preview = rawText.slice(0, 500);
+      } catch { /* ignore */ }
+      
+      const is504 = response.status === 504;
+      throw createCorrectionError(
+        is504 ? 'CORRECTION_HTTP_504' : 'CORRECTION_HTTP_ERROR',
+        is504 ? "API sağlayıcısı düzeltme isteğini zamanında tamamlayamadı (504)." : `Bağlantı hatası: ${response.status}`,
+        {
+          status: response.status,
+          statusText: response.statusText,
+          contentType: contentType,
+          bodyPreview: preview
         }
-      } catch {
-        /* ignore */
-      }
-      throw new Error(`Bağlantı hatası: ${response.status} ${errorMsg}`);
+      );
     }
 
     let aiResponseText = '';
@@ -431,6 +510,14 @@ model: ${body.model}`);
     
     console.log(logMessage);
 
+    if (body.stream && !finishReason && aiResponseText.length > 0) {
+      throw createCorrectionError('CORRECTION_STREAM_READ_FAILED', 'Stream [DONE] gelmeden kapandı.');
+    }
+    
+    if (!aiResponseText || aiResponseText.trim() === '') {
+      throw createCorrectionError('CORRECTION_EMPTY_RESPONSE', 'Stream tamamlanıp içerik boş döndü.');
+    }
+    
     if (finishReason === 'length') {
       throw new Error("Düzeltme cevabı çıktı token sınırında kesildi. API ayarlarındaki \"Düzeltme çıktı token limiti\" değerini artırın.");
     }

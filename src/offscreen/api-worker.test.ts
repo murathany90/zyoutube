@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 
 const chromeMock = {
   runtime: {
@@ -10,7 +10,17 @@ const chromeMock = {
 };
 (globalThis as any).chrome = chromeMock;
 
-import { normalizeUnknownError, classifyCorrectionError, createCorrectionError } from './api-worker';
+// Import will be hoisted anyway... wait, we need an await import inside beforeAll
+let normalizeUnknownError: any;
+let classifyCorrectionError: any;
+let createCorrectionError: any;
+
+beforeAll(async () => {
+  const worker = await import('./api-worker');
+  normalizeUnknownError = worker.normalizeUnknownError;
+  classifyCorrectionError = worker.classifyCorrectionError;
+  createCorrectionError = worker.createCorrectionError;
+});
 
 describe('api-worker error logic', () => {
   describe('normalizeUnknownError', () => {

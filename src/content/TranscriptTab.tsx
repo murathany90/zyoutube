@@ -274,8 +274,13 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       } else if (message.type === 'CORRECTION_FAILED') {
         const error = message.error;
         if (error) {
-          console.groupCollapsed(`[ZYouTube Correction] ${error.code || 'UNKNOWN'} — ${error.stage || 'unknown'}`);
-          console.error(error.userMessage || 'Düzeltme başarısız.');
+          console.groupCollapsed(`[ZYouTube Correction] ${error.code} — ${error.stage}`);
+          console.error(`Kullanıcı mesajı: ${error.userMessage}`);
+          console.error(`Teknik mesaj: ${error.technicalMessage}`);
+          console.error(`HTTP: ${error.httpStatus ?? "yok"}`);
+          console.error(`Finish reason: ${error.finishReason ?? "yok"}`);
+          console.error(`Yanıt karakteri: ${error.responseCharacters ?? 0}`);
+          console.error(`Geçen süre: ${error.elapsedMs ?? 0} ms`);
           console.table(error.diagnostics || {});
           console.groupEnd();
         }
