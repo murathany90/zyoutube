@@ -15,6 +15,11 @@ export interface LiveCorrectionEnvironment {
   correctionStreaming: boolean;
   correctionStreamOptions: boolean;
   correctionJsonMode: boolean;
+  liveUserDataDir?: string;
+}
+
+export interface LiveGeminiEnvironment {
+  gemUrl: string;
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -112,6 +117,33 @@ export function loadPrivateLiveCorrectionEnvironment(
     correctionJsonMode: parseBoolean(
       values.ZYOUTUBE_CORRECTION_JSON_MODE,
       true
-    )
+    ),
+    ...(values.ZYOUTUBE_LIVE_USER_DATA_DIR
+      ? {
+          liveUserDataDir: path.resolve(
+            values.ZYOUTUBE_LIVE_USER_DATA_DIR
+          )
+        }
+      : {})
+  };
+}
+
+export function loadPrivateLiveGeminiEnvironment(
+  projectRoot: string
+): LiveGeminiEnvironment {
+  const envPath = path.resolve(projectRoot, '.env');
+  const values = parseEnvFile(fs.readFileSync(envPath, 'utf8'));
+  const required = [
+    'ZYOUTUBE_GEM_URL'
+  ] as const;
+  const missing = required.filter(name => !values[name]);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required private Gemini environment fields: ${missing.join(', ')}`
+    );
+  }
+
+  return {
+    gemUrl: values.ZYOUTUBE_GEM_URL
   };
 }
