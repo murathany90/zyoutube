@@ -258,7 +258,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
             type: 'LIBRARY_ENTRY_UPDATED',
             videoId,
             reason: 'correction'
-          }).catch(console.warn);
+          }).catch(() => undefined);
 
           setIsCorrecting(false);
           setPendingCorrection(false);

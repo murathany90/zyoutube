@@ -73,7 +73,7 @@ export class CorrectionDB {
         const getRequest = store.getAll();
 
         getRequest.onsuccess = () => {
-          let results = getRequest.result as CorrectedTranscriptRecord[] || [];
+          let results = (getRequest.result as any[])?.filter(r => r && r.videoId && r.sentences) as CorrectedTranscriptRecord[] || [];
           results.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
           resolve(results);
         };

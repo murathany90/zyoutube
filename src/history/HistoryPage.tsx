@@ -40,8 +40,7 @@ export const HistoryPage = () => {
         return;
       }
 
-      const entries = await LibraryService.getEntries();
-      const foundEntry = entries.find(e => e.videoId === id || (e.savedSummary && e.savedSummary.id === id));
+      const foundEntry = await LibraryService.getEntry(id);
       
       if (foundEntry) {
         setEntry(foundEntry);

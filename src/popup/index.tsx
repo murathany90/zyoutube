@@ -1,3 +1,4 @@
+import { filterLibraryEntries } from './filter-helpers';
 import { createRoot } from 'react-dom/client';
 import { useState, useEffect } from 'react';
 import '../styles/popup.css';
@@ -611,43 +612,8 @@ const Popup = () => {
 
         {/* History / Özet Listesi Tab */}
         {activeTab === 'history' && (() => {
-          let filtered = libraryEntries;
-
-          // Search
-          if (searchQuery.trim()) {
-            const q = searchQuery.toLowerCase().trim();
-            filtered = filtered.filter(e => {
-              if (e.title.toLowerCase().includes(q)) return true;
-              if (e.savedSummary?.summary?.summary?.tr?.toLowerCase().includes(q)) return true;
-              if (e.savedSummary?.summary?.summary?.en?.toLowerCase().includes(q)) return true;
-              if (e.savedSummary?.summary?.keyIdeas?.some(k => k.title?.tr?.toLowerCase().includes(q) || k.title?.en?.toLowerCase().includes(q) || k.description?.tr?.toLowerCase().includes(q) || k.description?.en?.toLowerCase().includes(q))) return true;
-              if (e.correctedTranscript?.sentences?.some(s => s.correctedTurkish?.toLowerCase().includes(q) || s.correctedEnglish?.toLowerCase().includes(q))) return true;
-              if (e.studyWords?.some(w => 
-                w.displayWord.toLowerCase().includes(q) || 
-                w.meaningsTr.some(m => m.toLowerCase().includes(q)) || 
-                w.englishSentence.toLowerCase().includes(q) || 
-                w.turkishSentence.toLowerCase().includes(q)
-              )) return true;
-              return false;
-            });
-          }
-
-          // Filter
-          if (typeFilter === 'summary') filtered = filtered.filter(e => e.hasSummary);
-          else if (typeFilter === 'correction') filtered = filtered.filter(e => e.hasCorrectedTranscript);
-          else if (typeFilter === 'words') filtered = filtered.filter(e => e.hasStudyWords);
-          else if (typeFilter === 'transcript') filtered = filtered.filter(e => e.hasOriginalTranscript && !e.hasSummary && !e.hasCorrectedTranscript);
-
-          // Sort
-          filtered.sort((a, b) => {
-            const dateA = a.updatedAt;
-            const dateB = b.updatedAt;
-            if (sortOrder === 'latest') return dateB - dateA;
-            if (sortOrder === 'oldest') return dateA - dateB;
-            if (sortOrder === 'az') return a.title.localeCompare(b.title);
-            if (sortOrder === 'za') return b.title.localeCompare(a.title);
-            return 0;
-          });
+          
+          let filtered = filterLibraryEntries(libraryEntries, searchQuery, typeFilter, sortOrder);
 
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%' }}>
