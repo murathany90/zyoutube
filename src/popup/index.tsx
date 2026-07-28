@@ -45,10 +45,26 @@ const Popup = () => {
   const [saveStatus, setSaveStatus] = useState<string>('');
   const [gemUrlError, setGemUrlError] = useState<string>('');
   const [libraryEntries, setLibraryEntries] = useState<VideoLibraryEntry[]>([]);
+  const [isLibraryLoading, setIsLibraryLoading] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
+  
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [sortOrder, setSortOrder] = useState('latest');
   const [draftProvider, setDraftProvider] = useState<AIProviderConfig | null>(null);
+
+  const loadLibrary = async () => {
+    setIsLibraryLoading(true);
+    setLibraryError(null);
+    try {
+      const entries = await LibraryService.getEntries();
+      setLibraryEntries(entries);
+    } catch (err: unknown) {
+      setLibraryError(err instanceof Error ? err.message : 'Bilinmeyen hata oluştu');
+    } finally {
+      setIsLibraryLoading(false);
+    }
+  };
 
   useEffect(() => {
     AISettingsService.getSettings().then(s => {
@@ -58,9 +74,21 @@ const Popup = () => {
     GemSettingsService.getGemSettings().then(g => setGemSettings(g));
     GemSettingsService.getPanelSettings().then(p => setPanelSettings(p));
     LocalAIChecker.checkStatus().then(st => setLocalStatus(st));
-    LibraryService.getEntries().then(e => setLibraryEntries(e));
+    
+    loadLibrary();
+
     // Migration
     GemSettingsService.migrateFromGeminiApi();
+
+    // Listen for live updates
+    const handleMessage = (msg: unknown) => {
+      const message = msg as any;
+      if (message && message.type === 'LIBRARY_ENTRY_UPDATED') {
+        loadLibrary();
+      }
+    };
+    chrome.runtime.onMessage.addListener(handleMessage);
+    return () => chrome.runtime.onMessage.removeListener(handleMessage);
   }, []);
 
   const showSaved = () => {
@@ -660,11 +688,20 @@ const Popup = () => {
               </div>
               
               <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
-                {filtered.length === 0 ? (
+                {libraryError && (
+                  <div style={{ padding: '12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', color: '#991b1b', fontSize: '12px', textAlign: 'center' }}>
+                    <div style={{ marginBottom: '8px' }}>Liste yüklenirken bir hata oluştu: {libraryError}</div>
+                    <button onClick={loadLibrary} style={{ padding: '6px 12px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>Tekrar Dene</button>
+                  </div>
+                )}
+                
+                {!libraryError && isLibraryLoading && libraryEntries.length === 0 ? (
+                  <div style={{ padding: '20px', textAlign: 'center', color: '#6b7280', fontSize: '13px' }}>Yükleniyor...</div>
+                ) : !libraryError && filtered.length === 0 ? (
                   <div style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center', marginTop: '20px' }}>
                     {libraryEntries.length === 0 ? "Kayıt bulunamadı." : "Aramanızla eşleşen kayıt bulunamadı."}
                   </div>
-                ) : (
+                ) : !libraryError && (
                   filtered.map(s => (
                     <div key={s.videoId} style={{ display: 'flex', gap: '10px', padding: '10px', background: 'var(--zy-item-bg, #f3f4f6)', borderRadius: '6px', cursor: 'pointer', transition: 'background 0.2s', border: '1px solid var(--zy-border, #e5e7eb)' }}
                       onClick={(e) => {

@@ -222,3 +222,6 @@
 .zy-btn-danger:hover {
   background-color: #fee2e2;
 }
+
+.zy-search-highlight { background-color: #fef08a; padding: 0 2px; border-radius: 2px; color: #854d0e; }
+.zy-sentence-row-active { background-color: #f0fdf4 !important; border-left: 3px solid #22c55e; padding-left: 9px; }
