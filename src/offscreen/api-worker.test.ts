@@ -24,6 +24,53 @@ beforeAll(async () => {
 });
 
 describe('api-worker error logic', () => {
+  describe('timeout ve kullanıcı iptali ayrımı', () => {
+    it('BodyStreamBuffer abort timeout flag ile CORRECTION_TIMEOUT olur', () => {
+      const normalized = normalizeUnknownError(
+        new DOMException('BodyStreamBuffer was aborted', 'AbortError')
+      );
+
+      const result = classifyCorrectionError(normalized, {
+        timedOut: true,
+        userCancelled: false,
+        timeoutKind: 'total'
+      });
+
+      expect(result).toEqual({
+        code: 'CORRECTION_TIMEOUT',
+        stage: 'timeout',
+        retryable: true
+      });
+    });
+
+    it('kullanıcı iptal flag ile CORRECTION_CANCELLED olur', () => {
+      const normalized = normalizeUnknownError(
+        new DOMException('BodyStreamBuffer was aborted', 'AbortError')
+      );
+
+      const result = classifyCorrectionError(normalized, {
+        timedOut: false,
+        userCancelled: true
+      });
+
+      expect(result).toEqual({
+        code: 'CORRECTION_CANCELLED',
+        stage: 'cancelled',
+        retryable: false
+      });
+    });
+
+    it('flagsiz AbortError kullanıcı iptali sayılmaz', () => {
+      const normalized = normalizeUnknownError(
+        new DOMException('BodyStreamBuffer was aborted', 'AbortError')
+      );
+
+      expect(classifyCorrectionError(normalized).code).not.toBe(
+        'CORRECTION_CANCELLED'
+      );
+    });
+  });
+
   describe('normalizeUnknownError', () => {
     it('Error objesini dönüştürür', () => {
       const err = new Error('Test error');
@@ -125,14 +172,24 @@ describe('api-worker SSE and HTTP logic', () => {
     vi.useRealTimers();
   });
 
-  const sendCorrectionStart = (reasoning = false) => {
+  const sendCorrectionStart = (
+    reasoning = false,
+    configOverrides: Record<string, unknown> = {}
+  ) => {
     return messageListener(
       {
         type: 'API_CORRECTION_START',
         taskId: 'task-1',
         videoId: 'video-1',
         request: { transcript: { segments: [{ id: '1', text: 'test' }] }, options: {}, video: { title: 'Test Video' } },
-        config: { baseUrl: 'http://test', apiKey: 'key', model: 'test-model', correctionEnableReasoning: reasoning, stream: true }
+        config: {
+          baseUrl: 'http://test',
+          apiKey: 'key',
+          model: 'test-model',
+          correctionEnableReasoning: reasoning,
+          stream: true,
+          ...configOverrides
+        }
       },
       {},
       vi.fn()
@@ -299,6 +356,62 @@ describe('api-worker SSE and HTTP logic', () => {
     expect(failedCall![0].error.responseCharacters).toBe(0);
   });
 
+  it('8c. toplam timeout BodyStreamBuffer abort üretse de CORRECTION_TIMEOUT olur', async () => {
+    fetchMock.mockImplementation((_url: string, init: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          reject(new DOMException(
+            'BodyStreamBuffer was aborted',
+            'AbortError'
+          ));
+        }, { once: true });
+      });
+    });
+
+    sendCorrectionStart(false, { correctionTimeoutMs: 100 });
+    await vi.advanceTimersByTimeAsync(101);
+
+    const failedCall = chromeMock.runtime.sendMessage.mock.calls.find(
+      (call: any) => call[0].type === 'API_CORRECTION_FAILED'
+    );
+    expect(failedCall![0].error).toMatchObject({
+      code: 'CORRECTION_TIMEOUT',
+      stage: 'timeout',
+      timeoutKind: 'total',
+      retryable: true
+    });
+  });
+
+  it('8d. API_CORRECTION_CANCEL kullanıcı iptali olarak sınıflandırılır', async () => {
+    fetchMock.mockImplementation((_url: string, init: RequestInit) => {
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          reject(new DOMException(
+            'BodyStreamBuffer was aborted',
+            'AbortError'
+          ));
+        }, { once: true });
+      });
+    });
+
+    sendCorrectionStart(false, { correctionTimeoutMs: 1000 });
+    messageListener(
+      { type: 'API_CORRECTION_CANCEL', taskId: 'task-1' },
+      {},
+      vi.fn()
+    );
+    await vi.runAllTimersAsync();
+
+    const failedCall = chromeMock.runtime.sendMessage.mock.calls.find(
+      (call: any) => call[0].type === 'API_CORRECTION_FAILED'
+    );
+    expect(failedCall![0].error).toMatchObject({
+      code: 'CORRECTION_CANCELLED',
+      stage: 'cancelled',
+      retryable: false
+    });
+  });
+
   it('9b. HTTP hata diagnostics yalniz guvenli metadata tasir', async () => {
     fetchMock.mockResolvedValue({
       ok: false,
@@ -369,12 +482,22 @@ describe('api-worker SSE and HTTP logic', () => {
   });
 
   it('11. summary HTTP hatasında CORRECTION_* kodu kullanılmaz', async () => {
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const secretBody = JSON.stringify({
+      error: {
+        code: 'provider_error',
+        message: 'TEST_SECRET_DO_NOT_LEAK_67890'
+      }
+    });
     fetchMock.mockResolvedValue({
       ok: false,
       status: 500,
       statusText: 'Internal Error',
-      headers: new Headers(),
-      text: () => Promise.resolve('Error')
+      headers: new Headers({
+        'content-type': 'application/json',
+        'x-request-id': 'summary-request-123'
+      }),
+      text: () => Promise.resolve(secretBody)
     });
     
     messageListener(
@@ -393,5 +516,18 @@ describe('api-worker SSE and HTTP logic', () => {
     const calls = chromeMock.runtime.sendMessage.mock.calls;
     const failedCall = calls.find((c: any) => c[0].type === 'API_SUMMARY_FAILED');
     expect(failedCall![0].error.code).toBe('API_ERROR'); // NOT CORRECTION_HTTP_ERROR
+    expect(JSON.stringify(failedCall![0].error)).not.toContain(
+      'TEST_SECRET_DO_NOT_LEAK_67890'
+    );
+    expect(failedCall![0].error.diagnostics).toMatchObject({
+      httpStatus: 500,
+      providerErrorCode: 'provider_error',
+      requestId: 'summary-request-123',
+      contentType: 'application/json'
+    });
+    expect(
+      consoleLogSpy.mock.calls.map(call => call.join(' ')).join('\n')
+    ).not.toContain('TEST_SECRET_DO_NOT_LEAK_67890');
+    consoleLogSpy.mockRestore();
   });
 });

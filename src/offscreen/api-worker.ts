@@ -2,6 +2,12 @@ import { PromptBuilder } from '../ai/prompt-builder';
 import { ResponseParser } from '../ai/response-parser';
 import { CorrectionPromptBuilder } from '../ai/prompt-correction';
 import { CorrectionResponseParser } from '../ai/correction-parser';
+import {
+  CorrectionResponseTimeoutError,
+  readCorrectionResponse,
+  type CorrectionReadMetrics,
+  type CorrectionTimeoutKind
+} from './correction-response-reader';
 
 
 export type NormalizedCorrectionError = {
@@ -101,25 +107,28 @@ function createHttpDiagnostics(response: Response, rawText: string, contentType:
   };
 }
 
-function normalizeContentPart(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) {
-    return value.map((part: any) => {
-      if (typeof part === 'string') return part;
-      return part?.text || part?.content || '';
-    }).join('');
-  }
-  return '';
+interface CorrectionAbortState {
+  timedOut?: boolean;
+  userCancelled?: boolean;
+  timeoutKind?: CorrectionTimeoutKind;
 }
 
-export function classifyCorrectionError(normalized: NormalizedCorrectionError): { code: string, stage: string, retryable: boolean } {
+export function classifyCorrectionError(
+  normalized: NormalizedCorrectionError,
+  abortState: CorrectionAbortState = {}
+): { code: string, stage: string, retryable: boolean } {
     let stage = 'unknown';
     let code = normalized.code;
     
-    if (normalized.name === 'AbortError' || normalized.message === 'AbortError') {
-      code = 'CORRECTION_CANCELLED';
-    } else if (normalized.message === 'Timeout') {
+    if (abortState.timedOut || normalized.code === 'CORRECTION_TIMEOUT') {
       code = 'CORRECTION_TIMEOUT';
+    } else if (abortState.userCancelled) {
+      code = 'CORRECTION_CANCELLED';
+    } else if (
+      normalized.name === 'AbortError' ||
+      normalized.message === 'AbortError'
+    ) {
+      code = 'CORRECTION_STREAM_READ_FAILED';
     }
 
     if (code === 'CORRECTION_HTTP_ERROR' || code === 'CORRECTION_HTTP_504' || code.startsWith('HTTP_')) stage = 'http';
@@ -130,7 +139,7 @@ export function classifyCorrectionError(normalized: NormalizedCorrectionError): 
     else if (code === 'CORRECTION_TIMEOUT') stage = 'timeout';
     else code = 'CORRECTION_UNKNOWN';
     
-    const retryable = code !== 'CORRECTION_CANCELLED' && code !== 'CORRECTION_TIMEOUT';
+    const retryable = code !== 'CORRECTION_CANCELLED';
     
     return { code, stage, retryable };
 }
@@ -140,6 +149,9 @@ interface TaskContext {
   heartbeatId: number;
   timeoutId: number;
   startedAt: number;
+  timedOut?: boolean;
+  userCancelled?: boolean;
+  timeoutKind?: CorrectionTimeoutKind;
 }
 
 const activeTasks = new Map<string, TaskContext>();
@@ -192,6 +204,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'API_CORRECTION_CANCEL') {
     const task = activeTasks.get(message.taskId);
     if (task) {
+      task.userCancelled = true;
       task.controller.abort(new Error('AbortError'));
     }
     sendResponse({ success: true });
@@ -255,14 +268,19 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
     console.log(`[API Task] HTTP status: ${response.status}`);
 
     if (!response.ok) {
-      let preview = response.statusText;
+      let rawText = '';
+      const contentType = response.headers.get('content-type') || 'unknown';
       try {
-        const rawText = await response.text();
-        preview = rawText.slice(0, 500);
+        rawText = await response.text();
       } catch { /* ignore */ }
-      
-      const err = new Error(`API error: ${response.status} ${response.statusText} - ${preview}`);
+
+      const err = new Error(`API error: ${response.status} ${response.statusText}`);
       (err as any).code = 'API_ERROR';
+      (err as any).diagnostics = createHttpDiagnostics(
+        response,
+        rawText,
+        contentType
+      );
       throw err;
     }
 
@@ -357,7 +375,8 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
         error: {
             code: errorCode,
             userMessage: userMsg,
-            retryable: !isAbort
+            retryable: !isAbort,
+            ...(e?.diagnostics ? { diagnostics: e.diagnostics } : {})
         }
     }).catch(err => {
         console.error(`[API Task] delivery failed for task ${taskId}:`, err);
@@ -397,16 +416,21 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
   }, 15000);
 
   const timeoutMs = config.correctionTimeoutMs ?? 600000;
-  const timeoutId = window.setTimeout(() => {
-    controller.abort(new Error('Timeout'));
-  }, timeoutMs);
-
-  activeTasks.set(taskId, {
+  const taskContext: TaskContext = {
     controller,
     heartbeatId,
-    timeoutId,
-    startedAt
-  });
+    timeoutId: 0,
+    startedAt,
+    timedOut: false,
+    userCancelled: false
+  };
+  taskContext.timeoutId = window.setTimeout(() => {
+    taskContext.timedOut = true;
+    taskContext.timeoutKind = 'total';
+    controller.abort(new Error('Correction total timeout'));
+  }, timeoutMs);
+
+  activeTasks.set(taskId, taskContext);
   
   chrome.runtime.sendMessage({ type: 'API_CORRECTION_ACCEPTED', taskId }).catch(console.error);
   resetIdleTimer();
@@ -417,7 +441,17 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
   let streamDoneReceived = false;
   let sseEventCount = 0;
   let contentChunkCount = 0;
-  let contentType = 'string';
+  let responseContentType = 'unknown';
+  let readMetrics: CorrectionReadMetrics = {
+    contentType: 'unknown',
+    firstByteMs: null,
+    chunkCount: 0,
+    receivedBytes: 0,
+    receivedCharacters: 0,
+    lastSseEventAtMs: null,
+    sseEventCount: 0,
+    contentChunkCount: 0
+  };
 
   try {
     console.log(`[API Task] offscreen correction started for task ${taskId}`);
@@ -463,7 +497,12 @@ model: ${body.model}`);
     });
     
     const latencyMs = Math.round(performance.now() - fetchStart);
-    console.log(`[API Task] correction HTTP status: ${response.status}`);
+    responseContentType =
+      response.headers?.get?.('content-type') || 'unknown';
+    console.log(
+      `[API Task] correction response headers: status=${response.status}, ` +
+      `contentType=${responseContentType}, headersMs=${latencyMs}`
+    );
 
     if (!response.ok) {
       let rawText = '';
@@ -488,119 +527,69 @@ model: ${body.model}`);
       }
     }
 
-    if (body.stream && response.body) {
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      
-      let lastProgressTime = performance.now();
-      let buffer = '';
-
-      function processCorrectionSseLine(line: string): void {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) return;
-        const dataStr = trimmed.slice(5).trim();
-        
-        if (dataStr === '[DONE]') {
-          streamDoneReceived = true;
-          return;
-        }
-        
-        try {
-          const data = JSON.parse(dataStr);
-          sseEventCount += 1;
-          const content = normalizeContentPart(data.choices?.[0]?.delta?.content);
-          if (content) {
-            aiResponseText += content;
-            contentChunkCount += 1;
-          }
-          const reasoning = normalizeContentPart(data.choices?.[0]?.delta?.reasoning_content);
-          if (reasoning) {
-            reasoningContent += reasoning;
-          }
-          if (data.choices?.[0]?.finish_reason) {
-            finishReason = data.choices[0].finish_reason;
-          }
-        } catch { /* ignore */ }
-      }
-
-      while (true) {
-        const { done, value } = await reader.read();
-        
-        if (done) {
-          if (buffer.trim()) {
-            processCorrectionSseLine(buffer);
-          }
-          break;
-        }
-        
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        
-        for (const line of lines) {
-          processCorrectionSseLine(line);
-        }
-        const now = performance.now();
-        if (now - lastProgressTime >= 10000) {
-          lastProgressTime = now;
+    try {
+      const readResult = await readCorrectionResponse(response, {
+        expectedStreaming: Boolean(body.stream),
+        firstByteTimeoutMs:
+          config.correctionFirstByteTimeoutMs ?? 60000,
+        streamIdleTimeoutMs:
+          config.correctionStreamIdleTimeoutMs ?? 45000,
+        requestStartedAtMs: fetchStart,
+        onProgress: (metrics) => {
           chrome.runtime.sendMessage({
             type: 'API_CORRECTION_PROGRESS',
             taskId,
             videoId,
             stage: 'streaming',
-            message: `Yanıt alınıyor... ${aiResponseText.length} karakter`,
+            message:
+              `Yanıt alınıyor... ${metrics.receivedCharacters} karakter`,
             elapsedMs: Math.round(performance.now() - startedAt)
           }).catch(console.error);
         }
-      }
-    } else {
-      const data = await response.json();
-      if (!data.choices || !data.choices[0]) {
-         throw new Error("Geçersiz API yanıtı (choices dizisi boş).");
-      }
-      const messageObj = data.choices[0].message;
-      if (!messageObj) {
-         throw new Error("Geçersiz API yanıtı (message nesnesi eksik).");
-      }
-      
-      contentType = typeof messageObj.content;
-      if (typeof messageObj.content === 'string') {
-        aiResponseText = messageObj.content;
-      } else if (Array.isArray(messageObj.content)) {
-        aiResponseText = messageObj.content.map((part: any) => part.text || part.content || '').join('');
-      }
+      });
 
-      reasoningContent = messageObj.reasoning_content || '';
-      finishReason = data.choices[0].finish_reason;
-    }
-    // Loglama
-    let logMessage = `[API Task] Correction Response Info:\n` +
-      `- finish_reason: ${finishReason}\n` +
-      `- content type: ${contentType}\n` +
-      `- content length: ${aiResponseText.length}\n` +
-      `- reasoning_content length: ${reasoningContent.length}`;
-      
-    if (import.meta.env.DEV) {
-      logMessage += `\n- preview: ${aiResponseText.substring(0, 300).replace(/\n/g, ' ')}...`;
-    }
-    
-    console.log(logMessage);
+      aiResponseText = readResult.content;
+      reasoningContent = readResult.reasoningContent;
+      finishReason = readResult.finishReason;
+      streamDoneReceived = readResult.streamDoneReceived;
+      readMetrics = readResult.metrics;
+      sseEventCount = readMetrics.sseEventCount;
+      contentChunkCount = readMetrics.contentChunkCount;
 
-    const streamCompleted = streamDoneReceived || Boolean(finishReason);
-
-    if (body.stream && !streamCompleted) {
-      throw createCorrectionError(
-        'CORRECTION_STREAM_READ_FAILED',
-        'API yanıt akışı tamamlanma işareti olmadan kapandı.',
-        {
-          streamDoneReceived,
-          finishReason,
-          sseEventCount,
-          contentChunkCount,
-          responseCharacters: aiResponseText.length
-        }
-      );
+      if (
+        body.stream &&
+        readResult.transport === 'sse' &&
+        !streamDoneReceived &&
+        !finishReason
+      ) {
+        throw createCorrectionError(
+          'CORRECTION_STREAM_READ_FAILED',
+          'API yanıt akışı tamamlanma işareti olmadan kapandı.',
+          {
+            ...readMetrics,
+            streamDoneReceived,
+            finishReason
+          }
+        );
+      }
+    } catch (error) {
+      if (error instanceof CorrectionResponseTimeoutError) {
+        taskContext.timedOut = true;
+        taskContext.timeoutKind = error.timeoutKind;
+        if (!controller.signal.aborted) controller.abort(error);
+      }
+      throw error;
     }
+
+    console.log(
+      `[API Task] correction response metrics: ` +
+      `status=${response.status}, contentType=${responseContentType}, ` +
+      `firstByteMs=${readMetrics.firstByteMs ?? 'none'}, ` +
+      `chunks=${readMetrics.chunkCount}, bytes=${readMetrics.receivedBytes}, ` +
+      `characters=${readMetrics.receivedCharacters}, ` +
+      `lastSseEventAtMs=${readMetrics.lastSseEventAtMs ?? 'none'}, ` +
+      `sseEvents=${sseEventCount}, finishReason=${finishReason || 'none'}`
+    );
     
     if (finishReason === 'length') {
       throw new Error("Düzeltme cevabı çıktı token sınırında kesildi. API ayarlarındaki \"Düzeltme çıktı token limiti\" değerini artırın.");
@@ -651,7 +640,10 @@ model: ${body.model}`);
     
   } catch (e: any) {
     const normalized = normalizeUnknownError(e);
-    const { code, stage, retryable } = classifyCorrectionError(normalized);
+    const { code, stage, retryable } = classifyCorrectionError(
+      normalized,
+      taskContext
+    );
     
     let userMsg = normalized.message;
     if (code === 'CORRECTION_CANCELLED') userMsg = 'İstek iptal edildi.';
@@ -673,6 +665,13 @@ model: ${body.model}`);
       sseEventCount,
       contentChunkCount,
       responseCharacters: aiResponseText.length,
+      responseContentType,
+      firstByteMs: readMetrics.firstByteMs,
+      chunkCount: readMetrics.chunkCount,
+      receivedBytes: readMetrics.receivedBytes,
+      receivedCharacters: readMetrics.receivedCharacters,
+      lastSseEventAtMs: readMetrics.lastSseEventAtMs,
+      timeoutKind: taskContext.timeoutKind || null,
       elapsedMs: Math.round(performance.now() - startedAt),
       diagnostics: normalized.diagnostics || null
     };
@@ -693,6 +692,13 @@ model: ${body.model}`);
             finishReason: logData.finishReason,
             streamDoneReceived: logData.streamDoneReceived,
             responseCharacters: logData.responseCharacters,
+            responseContentType: logData.responseContentType,
+            firstByteMs: logData.firstByteMs,
+            chunkCount: logData.chunkCount,
+            receivedBytes: logData.receivedBytes,
+            receivedCharacters: logData.receivedCharacters,
+            lastSseEventAtMs: logData.lastSseEventAtMs,
+            timeoutKind: logData.timeoutKind,
             elapsedMs: logData.elapsedMs,
             retryable
         }

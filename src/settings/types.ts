@@ -28,6 +28,8 @@ export interface AIProviderConfig {
   baseUrl?: string;
   timeoutMs?: number;
   correctionTimeoutMs?: number;
+  correctionFirstByteTimeoutMs?: number;
+  correctionStreamIdleTimeoutMs?: number;
   temperature?: number;
   maxTokens?: number;
   contextWindowTokens?: number;
@@ -65,6 +67,8 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
       baseUrl: 'https://api.deepseek.com/v1',
       timeoutMs: 180000,
       correctionTimeoutMs: 600000,
+      correctionFirstByteTimeoutMs: 60000,
+      correctionStreamIdleTimeoutMs: 45000,
       temperature: 0.1,
       maxTokens: 4000,
       contextWindowTokens: 130000,
