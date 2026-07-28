@@ -57,8 +57,10 @@ ${JSON.stringify({ sourceLanguage: request.transcript.sourceLanguage, segments: 
         { role: 'user', content: userPrompt }
       ],
       temperature: config.temperature ?? 0.3,
-      max_tokens: config.correctionMaxTokens ?? 130000,
     };
+
+    const tokenParam = config.correctionTokenParam === 'max_completion_tokens' ? 'max_completion_tokens' : 'max_tokens';
+    body[tokenParam] = config.correctionMaxTokens ?? 130000;
     
     if (config.correctionEnableReasoning === true) {
       body.chat_template_kwargs = { thinking: true, reasoning_effort: "high" };
@@ -66,7 +68,9 @@ ${JSON.stringify({ sourceLanguage: request.transcript.sourceLanguage, segments: 
 
     if (config.correctionStreaming !== false) {
       body.stream = true;
-      body.stream_options = { include_usage: true };
+      if (config.correctionStreamOptions !== false) {
+        body.stream_options = { include_usage: true };
+      }
     }
     
     // correctionJsonMode varsayılan olarak true kabul edilir

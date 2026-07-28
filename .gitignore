@@ -7,3 +7,6 @@ playwright/.cache/
 *.cjs
 *.log
 test-chrome-profile/
+
+.env
+.env.*

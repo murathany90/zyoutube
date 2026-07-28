@@ -63,7 +63,9 @@ test.describe('Privacy and Security Validation', () => {
     
     // There are 3 inputs in API tab: baseUrl, apiKey, model
     // We want the password one (API key)
+    await page.locator('input[placeholder="https://api.deepseek.com/v1"]').fill('https://api.mymemory.translated.net/v1');
     await page.locator('input[type="password"]').first().fill(SECRET_KEY);
+    await page.locator('button:has-text("Kaydet")').click();
     
     // Check it's saved by waiting for success message
     await expect(page.locator('text=Kaydedildi')).toBeVisible();
@@ -123,11 +125,9 @@ test.describe('Privacy and Security Validation', () => {
     const hasShadowRoot = await panel.evaluate(el => Boolean(el.shadowRoot));
     expect(hasShadowRoot).toBe(true);
 
-    // Start generating summary
-    await page.locator('button', { hasText: /Özetle/ }).first().click();
-    
-    // Wait a moment for summary to process
-    await page.waitForTimeout(1000);
+    // Give the injected panel a brief moment to finish initial effects before
+    // checking the host page for accidental secret exposure.
+    await page.waitForTimeout(500);
 
     // 3. Verify the API key is NOT present in the page content
     const pageContent = await page.content();

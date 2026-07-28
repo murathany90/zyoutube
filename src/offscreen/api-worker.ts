@@ -66,6 +66,52 @@ export function createCorrectionError(
   return error;
 }
 
+function normalizeSafeMetadataToken(value: unknown): string | undefined {
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+  const token = String(value);
+  return /^[A-Za-z0-9._:/-]{1,128}$/.test(token) ? token : undefined;
+}
+
+function createHttpDiagnostics(response: Response, rawText: string, contentType: string) {
+  let providerErrorCode: string | undefined;
+  let providerErrorType: string | undefined;
+
+  try {
+    const parsed = JSON.parse(rawText);
+    providerErrorCode = normalizeSafeMetadataToken(parsed?.error?.code ?? parsed?.code);
+    providerErrorType = normalizeSafeMetadataToken(parsed?.error?.type ?? parsed?.type);
+  } catch {
+    // Non-JSON bodies are intentionally not retained.
+  }
+
+  const requestId = normalizeSafeMetadataToken(
+    response.headers.get('x-request-id') ??
+    response.headers.get('request-id') ??
+    response.headers.get('cf-ray')
+  );
+
+  return {
+    httpStatus: response.status,
+    statusText: response.statusText,
+    contentType,
+    bodyCharacterCount: rawText.length,
+    ...(providerErrorCode ? { providerErrorCode } : {}),
+    ...(providerErrorType ? { providerErrorType } : {}),
+    ...(requestId ? { requestId } : {})
+  };
+}
+
+function normalizeContentPart(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value.map((part: any) => {
+      if (typeof part === 'string') return part;
+      return part?.text || part?.content || '';
+    }).join('');
+  }
+  return '';
+}
+
 export function classifyCorrectionError(normalized: NormalizedCorrectionError): { code: string, stage: string, retryable: boolean } {
     let stage = 'unknown';
     let code = normalized.code;
@@ -385,11 +431,12 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
     console.log(`[API Task] correction POST started`);
     
     const inputChars = JSON.stringify(body).length;
+    const maxOutputTokens = body.max_tokens ?? body.max_completion_tokens;
     console.log(`[Correction Request]
 segmentCount: ${request.transcript.segments.length}
 inputCharacters: ${inputChars}
 estimatedInputTokens: ${Math.round(inputChars / 4)}
-maxOutputTokens: ${body.max_tokens}
+maxOutputTokens: ${maxOutputTokens}
 streaming: ${body.stream || false}
 reasoningEnabled: ${config.correctionEnableReasoning || false}
 model: ${body.model}`);
@@ -419,34 +466,24 @@ model: ${body.model}`);
     console.log(`[API Task] correction HTTP status: ${response.status}`);
 
     if (!response.ok) {
-      let preview = response.statusText;
+      let rawText = '';
       let respContentType = response.headers.get('content-type') || 'unknown';
       try {
-        const rawText = await response.text();
-        preview = rawText.slice(0, 500);
+        rawText = await response.text();
       } catch { /* ignore */ }
+      const diagnostics = createHttpDiagnostics(response, rawText, respContentType);
 
       if (response.status === 504) {
         throw createCorrectionError(
           'CORRECTION_HTTP_504',
           'API sağlayıcısı düzeltme isteğini zamanında tamamlayamadı (504).',
-          {
-            httpStatus: response.status,
-            statusText: response.statusText,
-            contentType: respContentType,
-            bodyPreview: preview
-          }
+          diagnostics
         );
       } else {
         throw createCorrectionError(
           'CORRECTION_HTTP_ERROR',
           `Düzeltme API isteği başarısız oldu: ${response.status}`,
-          {
-            httpStatus: response.status,
-            statusText: response.statusText,
-            contentType: respContentType,
-            bodyPreview: preview
-          }
+          diagnostics
         );
       }
     }
@@ -471,10 +508,14 @@ model: ${body.model}`);
         try {
           const data = JSON.parse(dataStr);
           sseEventCount += 1;
-          const content = data.choices?.[0]?.delta?.content;
+          const content = normalizeContentPart(data.choices?.[0]?.delta?.content);
           if (content) {
             aiResponseText += content;
             contentChunkCount += 1;
+          }
+          const reasoning = normalizeContentPart(data.choices?.[0]?.delta?.reasoning_content);
+          if (reasoning) {
+            reasoningContent += reasoning;
           }
           if (data.choices?.[0]?.finish_reason) {
             finishReason = data.choices[0].finish_reason;

@@ -149,6 +149,7 @@ export class CorrectionResponseParser {
         
         const result: any = {
           id: `corrected-${index}-${Date.now()}`,
+          index,
           startTimeMs: 0,
           endTimeMs: 0,
           sourceSegmentIds: segmentIds,
@@ -194,7 +195,8 @@ export class CorrectionResponseParser {
     const segmentMap = new Map(sourceSegments.map((s, idx) => [s.id, { ...s, index: idx }]));
 
     const enriched = apiSentences.map((sentenceAny: any) => {
-      const sentence = sentenceAny as CorrectedBilingualSentence & { _from?: number; _to?: number };
+      const sentence = sentenceAny as CorrectedBilingualSentence & { _from?: number; _to?: number; index?: number };
+      const sentenceNumber = typeof sentence.index === 'number' ? sentence.index + 1 : lastSegmentIndex + 2;
       
       if (typeof sentence._from === 'number' && typeof sentence._to === 'number') {
         if (sentence._from !== lastSegmentIndex + 1) {
@@ -252,10 +254,10 @@ export class CorrectionResponseParser {
 
       if (!sentence.correctedTurkish) {
         if (!originalTurkish) {
-          const error: any = new Error(`${sentenceAny.index + 1}. cümle için Türkçe çıktı üretilemedi ve kaynak Türkçe metin de bulunamadı. Aralık: ${sentence._from}-${sentence._to}.`);
+          const error: any = new Error(`${sentenceNumber}. cümle için Türkçe çıktı üretilemedi ve kaynak Türkçe metin de bulunamadı. Aralık: ${sentence._from}-${sentence._to}.`);
           error.code = 'CORRECTION_LANGUAGE_MISSING';
           error.diagnostics = {
-            sentenceNumber: sentenceAny.index + 1,
+            sentenceNumber,
             from: sentence._from,
             to: sentence._to,
             missingLanguage: 'tr',
@@ -273,10 +275,10 @@ export class CorrectionResponseParser {
 
       if (!sentence.correctedEnglish) {
         if (!originalEnglish) {
-          const error: any = new Error(`${sentenceAny.index + 1}. cümle için İngilizce çıktı üretilemedi ve kaynak İngilizce metin de bulunamadı. Aralık: ${sentence._from}-${sentence._to}.`);
+          const error: any = new Error(`${sentenceNumber}. cümle için İngilizce çıktı üretilemedi ve kaynak İngilizce metin de bulunamadı. Aralık: ${sentence._from}-${sentence._to}.`);
           error.code = 'CORRECTION_LANGUAGE_MISSING';
           error.diagnostics = {
-            sentenceNumber: sentenceAny.index + 1,
+            sentenceNumber,
             from: sentence._from,
             to: sentence._to,
             missingLanguage: 'en',
@@ -300,12 +302,12 @@ export class CorrectionResponseParser {
 
       if (trFallback) {
         sentence.confidence = Math.min(sentence.confidence, 0.5);
-        sentence.warnings.push(`${sentenceAny.index + 1}. cümlede yapay zekâ Türkçe çıktı üretmedi; orijinal Türkçe metin kullanıldı.`);
+        sentence.warnings.push(`${sentenceNumber}. cümlede yapay zekâ Türkçe çıktı üretmedi; orijinal Türkçe metin kullanıldı.`);
       }
       
       if (enFallback) {
         sentence.confidence = Math.min(sentence.confidence, 0.5);
-        sentence.warnings.push(`${sentenceAny.index + 1}. cümlede yapay zekâ İngilizce çıktı üretmedi; orijinal İngilizce metin kullanıldı.`);
+        sentence.warnings.push(`${sentenceNumber}. cümlede yapay zekâ İngilizce çıktı üretmedi; orijinal İngilizce metin kullanıldı.`);
       }
 
       return sentence;

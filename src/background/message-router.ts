@@ -4,6 +4,7 @@ import { GemSettingsService } from '../gem/settings';
 import { captureNativeYouTubeCaption } from './native-caption-broker';
 import { setupOffscreenDocument, closeOffscreenDocument } from './offscreen-manager';
 import { AISettingsService } from '../settings/ai-settings';
+import { relayCorrectionTerminalMessage } from './correction-terminal-relay';
 
 export type ExtensionMessage =
   | { type: 'YOUTUBE_URL_CHANGED'; url: string }
@@ -352,22 +353,20 @@ export function setupMessageRouter() {
                   [`api_task_${(message as any).taskId}`]: { ...taskState, lastHeartbeatAt: Date.now() } 
               }).catch(console.error);
            } else if (message.type === 'API_CORRECTION_COMPLETED') {
-              chrome.storage.session.remove(`api_task_${(message as any).taskId}`).catch(console.error);
-              chrome.tabs.sendMessage(taskState.tabId, {
-                  type: 'CORRECTION_COMPLETED',
-                  taskId: (message as any).taskId,
-                  result: (message as any).result
+              relayCorrectionTerminalMessage(message, taskState, {
+                persist: (key, value) => chrome.storage.session.set({ [key]: value }),
+                deliver: (tabId, contentMessage) => chrome.tabs.sendMessage(tabId, contentMessage),
+                remove: (key) => chrome.storage.session.remove(key)
               }).catch(e => {
-                  console.error(`[API Task] delivery failed for task ${(message as any).taskId}:`, e);
+                console.error(`[API Task] delivery failed for task ${message.taskId}:`, e);
               });
            } else if (message.type === 'API_CORRECTION_FAILED') {
-              chrome.storage.session.remove(`api_task_${(message as any).taskId}`).catch(console.error);
-              chrome.tabs.sendMessage(taskState.tabId, {
-                  type: 'CORRECTION_FAILED',
-                  taskId: (message as any).taskId,
-                  error: (message as any).error
+              relayCorrectionTerminalMessage(message, taskState, {
+                persist: (key, value) => chrome.storage.session.set({ [key]: value }),
+                deliver: (tabId, contentMessage) => chrome.tabs.sendMessage(tabId, contentMessage),
+                remove: (key) => chrome.storage.session.remove(key)
               }).catch(e => {
-                  console.error(`[API Task] delivery failed for task ${(message as any).taskId}:`, e);
+                console.error(`[API Task] delivery failed for task ${message.taskId}:`, e);
               });
            } else if (message.type === 'API_CORRECTION_PROGRESS') {
               chrome.tabs.sendMessage(taskState.tabId, {
