@@ -37,6 +37,12 @@ export interface AIProviderConfig {
   isSessionStorage?: boolean;
   responseMode?: 'markdown' | 'json';
   enableReasoning?: boolean;
+  summaryJsonMode?: boolean;
+  summaryStreaming?: boolean;
+  summaryStreamOptions?: boolean;
+  summaryTokenParam?: 'max_tokens' | 'max_completion_tokens';
+  summaryFirstByteTimeoutMs?: number;
+  summaryStreamIdleTimeoutMs?: number;
   correctionJsonMode?: boolean;
   correctionMaxTokens?: number;
   correctionStreaming?: boolean;
@@ -75,6 +81,12 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
       isSessionStorage: false,
       responseMode: 'markdown',
       enableReasoning: false,
+      summaryJsonMode: true,
+      summaryStreaming: false,
+      summaryStreamOptions: false,
+      summaryTokenParam: 'max_tokens',
+      summaryFirstByteTimeoutMs: 60000,
+      summaryStreamIdleTimeoutMs: 45000,
       correctionJsonMode: true,
       correctionMaxTokens: 130000,
       correctionStreaming: true,

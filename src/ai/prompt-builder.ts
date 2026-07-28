@@ -74,13 +74,32 @@ ${instructions}`;
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      temperature: config.temperature ?? 0.7,
-      max_tokens: config.maxTokens,
+      temperature: config.temperature ?? 0.7
     };
+
+    const tokenParam = config.summaryTokenParam === 'max_completion_tokens'
+      ? 'max_completion_tokens'
+      : 'max_tokens';
+    body[tokenParam] = config.maxTokens ?? 4000;
+
+    if (config.summaryStreaming === true) {
+      body.stream = true;
+      if (config.summaryStreamOptions === true) {
+        body.stream_options = { include_usage: true };
+      }
+    }
     
     if (config.enableReasoning === true) {
       body.chat_template_kwargs = { thinking: true, reasoning_effort: "high" };
-    } else if (config.responseMode === 'json') {
+    }
+
+    if (
+      config.summaryJsonMode === true ||
+      (
+        config.summaryJsonMode === undefined &&
+        config.responseMode === 'json'
+      )
+    ) {
       body.response_format = { type: 'json_object' };
     }
 

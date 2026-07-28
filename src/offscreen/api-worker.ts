@@ -184,6 +184,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'API_SUMMARY_CANCEL') {
     const task = activeTasks.get(message.taskId);
     if (task) {
+      task.userCancelled = true;
       task.controller.abort(new Error('AbortError'));
       // Clean up happens in the finally block of handleApiSummaryStart
     }
@@ -225,16 +226,21 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
   }, 15000);
 
   const timeoutMs = config.timeoutMs ?? 180000;
-  const timeoutId = window.setTimeout(() => {
-    controller.abort(new Error('Timeout'));
-  }, timeoutMs);
-
-  activeTasks.set(taskId, {
+  const taskContext: TaskContext = {
     controller,
     heartbeatId,
-    timeoutId,
-    startedAt
-  });
+    timeoutId: 0,
+    startedAt,
+    timedOut: false,
+    userCancelled: false
+  };
+  taskContext.timeoutId = window.setTimeout(() => {
+    taskContext.timedOut = true;
+    taskContext.timeoutKind = 'total';
+    controller.abort(new Error('Summary total timeout'));
+  }, timeoutMs);
+
+  activeTasks.set(taskId, taskContext);
   
   // 4. Offscreen kabul onayı
   chrome.runtime.sendMessage({ type: 'API_SUMMARY_ACCEPTED', taskId }).catch(console.error);
@@ -284,37 +290,69 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
       throw err;
     }
 
-    let aiResponseText = '';
-    let usage: any = undefined;
-    
+    let readResult;
     try {
-      const data = await response.json();
-      if (!data.choices || !data.choices[0]) {
-         throw new Error("Geçersiz API yanıtı (choices dizisi boş).");
+      readResult = await readCorrectionResponse(response, {
+        expectedStreaming: Boolean(body.stream),
+        firstByteTimeoutMs: config.summaryFirstByteTimeoutMs ?? 60000,
+        streamIdleTimeoutMs: config.summaryStreamIdleTimeoutMs ?? 45000,
+        requestStartedAtMs: fetchStart,
+        onProgress: (metrics) => {
+          chrome.runtime.sendMessage({
+            type: 'SUMMARY_PROGRESS',
+            taskId,
+            videoId,
+            status: 'summarizing',
+            message: `Yanıt alınıyor... ${metrics.receivedCharacters} karakter`
+          }).catch(console.error);
+        }
+      });
+    } catch (error) {
+      if (error instanceof CorrectionResponseTimeoutError) {
+        taskContext.timedOut = true;
+        taskContext.timeoutKind = error.timeoutKind;
+        if (!controller.signal.aborted) controller.abort(error);
       }
-      
-      const messageObj = data.choices[0].message;
-      if (!messageObj) {
-         throw new Error("Geçersiz API yanıtı (message nesnesi eksik).");
-      }
-      
-      aiResponseText = messageObj.content || '';
-      
-      if (!aiResponseText || aiResponseText.trim() === '') {
-        aiResponseText = messageObj.reasoning_content || '';
-      }
-      
-      if (!aiResponseText || aiResponseText.trim() === '') {
-        throw new Error("EMPTY_API_RESPONSE: API yanıtı içerik veya düşünme (reasoning) verisi barındırmıyor.");
-      }
-      
-      if (data.choices[0].finish_reason === 'content_filter') {
-         throw new Error("İçerik filtrelemesi nedeniyle yanıt alınamadı.");
-      }
-      
-      usage = data.usage;
-    } catch (e: any) {
-       throw new Error(e.message || "JSON yanıtı işlenemedi.");
+      throw error;
+    }
+
+    const aiResponseText = readResult.content;
+    console.log(
+      `[API Task] summary response metrics: ` +
+      `status=${response.status}, contentType=${readResult.metrics.contentType}, ` +
+      `firstByteMs=${readResult.metrics.firstByteMs ?? 'none'}, ` +
+      `chunks=${readResult.metrics.chunkCount}, ` +
+      `bytes=${readResult.metrics.receivedBytes}, ` +
+      `characters=${readResult.metrics.receivedCharacters}, ` +
+      `lastSseEventAtMs=${readResult.metrics.lastSseEventAtMs ?? 'none'}`
+    );
+
+    if (
+      body.stream &&
+      readResult.transport === 'sse' &&
+      !readResult.streamDoneReceived &&
+      !readResult.finishReason
+    ) {
+      throw createCorrectionError(
+        'SUMMARY_STREAM_READ_FAILED',
+        'API özet akışı tamamlanma işareti olmadan kapandı.'
+      );
+    }
+    if (readResult.finishReason === 'content_filter') {
+      throw createCorrectionError(
+        'SUMMARY_CONTENT_BLOCKED',
+        'İçerik filtrelemesi nedeniyle özet yanıtı alınamadı.'
+      );
+    }
+    if (!aiResponseText.trim()) {
+      throw createCorrectionError(
+        readResult.reasoningContent.trim()
+          ? 'SUMMARY_FINAL_CONTENT_MISSING'
+          : 'SUMMARY_EMPTY_RESPONSE',
+        readResult.reasoningContent.trim()
+          ? 'Model yalnızca akıl yürütme içeriği döndürdü; final özet bulunamadı.'
+          : 'API özet yanıtı boş döndü.'
+      );
     }
 
     const parsedResult = ResponseParser.parseAndValidate(
@@ -333,14 +371,6 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
       latencyMs,
       timestamp: Date.now()
     };
-    
-    if (usage) {
-       finalResult.usage = {
-         inputTokens: usage.prompt_tokens || 0,
-         outputTokens: usage.completion_tokens || 0,
-         totalTokens: usage.total_tokens || 0
-       };
-    }
     
     if (request.transcript.warnings) {
         finalResult.warnings = finalResult.warnings || [];
@@ -361,12 +391,30 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
     });
     
   } catch (e: any) {
-    console.log(`[API Task] failed:`, e);
-    const isTimeout = e.message === 'Timeout';
-    const isAbort = e.name === 'AbortError' || e.message === 'AbortError';
-    
-    const errorCode = isAbort ? 'REQUEST_CANCELLED' : (isTimeout ? 'TIMEOUT' : (e.code || 'UNKNOWN_ERROR'));
-    const userMsg = isAbort ? 'İstek kullanıcı tarafından iptal edildi.' : (isTimeout ? 'İstek zaman aşımına uğradı. İşlem çok uzun sürdü.' : (e.message || 'Beklenmeyen bir hata oluştu.'));
+    const normalized = normalizeUnknownError(e);
+    const isTimeout =
+      taskContext.timedOut ||
+      e instanceof CorrectionResponseTimeoutError;
+    const isCancelled = taskContext.userCancelled === true;
+    const errorCode = isTimeout
+      ? 'REQUEST_TIMEOUT'
+      : isCancelled
+        ? 'REQUEST_CANCELLED'
+        : normalized.code || 'UNKNOWN_ERROR';
+    const userMsg = isTimeout
+      ? 'API özet isteği zaman aşımına uğradı.'
+      : isCancelled
+        ? 'İstek kullanıcı tarafından iptal edildi.'
+        : normalized.message || 'Beklenmeyen bir hata oluştu.';
+    const safeLog = {
+      taskId,
+      videoId,
+      code: errorCode,
+      timeoutKind: taskContext.timeoutKind || null,
+      elapsedMs: Math.round(performance.now() - startedAt),
+      diagnostics: normalized.diagnostics || null
+    };
+    console.error(`[ZYouTube Summary Error]\n${JSON.stringify(safeLog, null, 2)}`);
     
     chrome.runtime.sendMessage({
         type: 'API_SUMMARY_FAILED',
@@ -375,8 +423,11 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
         error: {
             code: errorCode,
             userMessage: userMsg,
-            retryable: !isAbort,
-            ...(e?.diagnostics ? { diagnostics: e.diagnostics } : {})
+            retryable: !isCancelled,
+            ...(normalized.diagnostics
+              ? { diagnostics: normalized.diagnostics }
+              : {}),
+            timeoutKind: taskContext.timeoutKind || null
         }
     }).catch(err => {
         console.error(`[API Task] delivery failed for task ${taskId}:`, err);

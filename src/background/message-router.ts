@@ -30,7 +30,11 @@ export type ExtensionMessage =
   | { type: 'PANEL_SETTINGS_CHANGED' }
   | { type: 'COPY_TO_CLIPBOARD'; text: string }
   | { type: 'PING_BACKGROUND' }
-  | { type: 'TEST_CONNECTION'; providerId: any }
+  | {
+      type: 'TEST_CONNECTION';
+      providerId: any;
+      requestType?: 'summary' | 'correction';
+    }
   | { type: 'API_SUMMARY_START'; taskId: string; videoId: string; request: any; config: any }
   | { type: 'START_CORRECTION'; request: any }
   | { type: 'API_CORRECTION_START'; taskId: string; videoId: string; request: any; config: any }
@@ -615,7 +619,13 @@ export function setupMessageRouter() {
         if (!provider) {
           sendResponse({ success: false, message: 'Provider bulunamadı' });
         } else {
-          provider.testConnection().then(sendResponse).catch((e: any) => sendResponse({ success: false, message: e.message }));
+          provider
+            .testConnection(undefined, message.requestType)
+            .then(sendResponse)
+            .catch(() => sendResponse({
+              success: false,
+              message: 'Bağlantı testi tamamlanamadı.'
+            }));
         }
       }).catch(() => sendResponse({ success: false, message: 'Registry module error' }));
       return true;

@@ -5,6 +5,11 @@ export interface LiveCorrectionEnvironment {
   baseUrl: string;
   apiKey: string;
   model: string;
+  summaryMaxTokens: number;
+  summaryTokenParam: 'max_tokens' | 'max_completion_tokens';
+  summaryStreaming: boolean;
+  summaryStreamOptions: boolean;
+  summaryJsonMode: boolean;
   correctionMaxTokens: number;
   correctionTokenParam: 'max_tokens' | 'max_completion_tokens';
   correctionStreaming: boolean;
@@ -63,11 +68,34 @@ export function loadPrivateLiveCorrectionEnvironment(
   if (!Number.isFinite(correctionMaxTokens) || correctionMaxTokens <= 0) {
     throw new Error('ZYOUTUBE_CORRECTION_MAX_TOKENS must be a positive number.');
   }
+  const summaryMaxTokens = Number(
+    values.ZYOUTUBE_SUMMARY_MAX_TOKENS || '4000'
+  );
+  if (!Number.isFinite(summaryMaxTokens) || summaryMaxTokens <= 0) {
+    throw new Error('ZYOUTUBE_SUMMARY_MAX_TOKENS must be a positive number.');
+  }
 
   return {
     baseUrl: values.ZYOUTUBE_API_BASE_URL,
     apiKey: values.ZYOUTUBE_API_KEY,
     model: values.ZYOUTUBE_API_MODEL,
+    summaryMaxTokens,
+    summaryTokenParam:
+      values.ZYOUTUBE_SUMMARY_TOKEN_PARAM === 'max_completion_tokens'
+        ? 'max_completion_tokens'
+        : 'max_tokens',
+    summaryStreaming: parseBoolean(
+      values.ZYOUTUBE_SUMMARY_STREAMING,
+      false
+    ),
+    summaryStreamOptions: parseBoolean(
+      values.ZYOUTUBE_SUMMARY_STREAM_OPTIONS,
+      false
+    ),
+    summaryJsonMode: parseBoolean(
+      values.ZYOUTUBE_SUMMARY_JSON_MODE,
+      true
+    ),
     correctionMaxTokens,
     correctionTokenParam:
       values.ZYOUTUBE_CORRECTION_TOKEN_PARAM === 'max_completion_tokens'

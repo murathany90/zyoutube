@@ -160,7 +160,7 @@ const Popup = () => {
     return true;
   };
 
-  const [testStatus, setTestStatus] = useState<{type: 'loading'|'success'|'error', message: string, latency?: number, limits?: string, aiResponse?: string} | null>(null);
+  const [testStatus, setTestStatus] = useState<{type: 'loading'|'success'|'error', message: string, latency?: number, limits?: string} | null>(null);
   
   const [showPreview, setShowPreview] = useState(false);
   const [previewTab, setPreviewTab] = useState<'json'|'prompt'>('json');
@@ -178,16 +178,19 @@ const Popup = () => {
     if (!saved) return;
     
     setTestStatus({ type: 'loading', message: 'Bağlantı test ediliyor, lütfen bekleyin...' });
-    chrome.runtime.sendMessage({ type: 'TEST_CONNECTION', providerId: id }, (response) => {
+    chrome.runtime.sendMessage({
+      type: 'TEST_CONNECTION',
+      providerId: id,
+      requestType: previewRequestType
+    }, (response) => {
       if (chrome.runtime.lastError) {
         setTestStatus({ type: 'error', message: 'Bağlantı hatası: ' + chrome.runtime.lastError.message });
       } else if (response && response.success) {
         setTestStatus({ 
           type: 'success', 
-          message: 'Bağlantı Başarılı!',
+          message: response.message || 'Bağlantı Başarılı!',
           latency: response.latencyMs,
-          limits: response.limits,
-          aiResponse: response.message
+          limits: response.limits
         });
       } else {
         setTestStatus({ type: 'error', message: `Bağlantı Başarısız!\nHata: ${response?.message || 'Bilinmeyen hata'}` });
@@ -434,13 +437,13 @@ const Popup = () => {
                   />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Format</label>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Özet token parametresi</label>
                   <select style={selectStyle}
-                    value={draftProvider?.responseMode || 'markdown'}
-                    onChange={e => updateProviderDraft({ responseMode: e.target.value as any })}
+                    value={draftProvider?.summaryTokenParam || 'max_tokens'}
+                    onChange={e => updateProviderDraft({ summaryTokenParam: e.target.value as any })}
                   >
-                    <option value="markdown">Markdown</option>
-                    <option value="json">JSON Object</option>
+                    <option value="max_tokens">max_tokens</option>
+                    <option value="max_completion_tokens">max_completion_tokens</option>
                   </select>
                 </div>
               </div>
@@ -456,6 +459,21 @@ const Popup = () => {
                     placeholder="130000"
                   />
                 </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Özet çıktı token limiti</label>
+                  <input type="number" style={inputStyle}
+                    value={draftProvider?.maxTokens ?? 4000}
+                    onChange={e => {
+                      const val = parseInt(e.target.value);
+                      updateProviderDraft({ maxTokens: (isNaN(val) || val < 100) ? 4000 : val });
+                    }}
+                    min={100}
+                    max={1000000}
+                    placeholder="4000"
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
                 <div style={{ flex: 1 }}>
                   <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Düzeltme çıktı token limiti</label>
                   <input type="number" style={inputStyle}
@@ -473,6 +491,16 @@ const Popup = () => {
                     placeholder="130000"
                   />
                 </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Düzeltme token parametresi</label>
+                  <select style={selectStyle}
+                    value={draftProvider?.correctionTokenParam || 'max_tokens'}
+                    onChange={e => updateProviderDraft({ correctionTokenParam: e.target.value as any })}
+                  >
+                    <option value="max_tokens">max_tokens</option>
+                    <option value="max_completion_tokens">max_completion_tokens</option>
+                  </select>
+                </div>
               </div>
               <Toggle label="Yalnızca oturum boyunca sakla"
                 checked={draftProvider?.isSessionStorage || false}
@@ -482,11 +510,47 @@ const Popup = () => {
                 checked={draftProvider?.enableReasoning || false}
                 onChange={v => updateProviderDraft({ enableReasoning: v })}
               />
+              <Toggle label="Özet Streaming"
+                checked={draftProvider?.summaryStreaming === true}
+                onChange={v => updateProviderDraft({ summaryStreaming: v })}
+              />
+              <Toggle label="Özet stream_options"
+                checked={draftProvider?.summaryStreamOptions === true}
+                onChange={v => updateProviderDraft({ summaryStreamOptions: v })}
+              />
+              <Toggle label="Özette JSON Response Format"
+                checked={draftProvider?.summaryJsonMode !== false}
+                onChange={v => updateProviderDraft({ summaryJsonMode: v })}
+              />
+              <Toggle label="Düzeltme Streaming"
+                checked={draftProvider?.correctionStreaming !== false}
+                onChange={v => updateProviderDraft({ correctionStreaming: v })}
+              />
+              <Toggle label="Düzeltme stream_options"
+                checked={draftProvider?.correctionStreamOptions !== false}
+                onChange={v => updateProviderDraft({ correctionStreamOptions: v })}
+              />
+              <Toggle label="Düzeltme Akıl Yürütme"
+                checked={draftProvider?.correctionEnableReasoning === true}
+                onChange={v => updateProviderDraft({ correctionEnableReasoning: v })}
+              />
               <Toggle label="Düzeltmede JSON Response Format (Önerilen)"
                 checked={draftProvider?.correctionJsonMode !== false}
                 onChange={v => updateProviderDraft({ correctionJsonMode: v })}
               />
               
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Bağlantı testi türü</label>
+                <select
+                  style={selectStyle}
+                  value={previewRequestType}
+                  onChange={e => setPreviewRequestType(e.target.value as 'summary' | 'correction')}
+                >
+                  <option value="summary">Özet isteği</option>
+                  <option value="correction">Düzeltme isteği</option>
+                </select>
+              </div>
+
               <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                 <button onClick={() => {
                   if (draftProvider) requestPermissionAndSave(draftProvider);
@@ -591,7 +655,6 @@ const Popup = () => {
                   <div style={{ fontWeight: 700, marginBottom: '4px' }}>{testStatus.message}</div>
                   {testStatus.latency !== undefined && <div><strong>Gecikme:</strong> {testStatus.latency}ms</div>}
                   {testStatus.limits && <div><strong>Limitler:</strong> {testStatus.limits}</div>}
-                  {testStatus.aiResponse && <div style={{ marginTop: '4px', fontStyle: 'italic', opacity: 0.9 }}>AI Yanıtı: "{testStatus.aiResponse}"</div>}
                 </div>
               )}
               

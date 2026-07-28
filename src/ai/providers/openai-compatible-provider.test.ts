@@ -117,4 +117,125 @@ describe('OpenAICompatibleProvider Boundary Tests', () => {
       expect(e.code).toBe('REQUEST_CANCELLED');
     }
   });
+
+  it('tests the selected summary request format without returning response content', async () => {
+    (AISettingsService.getProviderConfig as any).mockResolvedValue({
+      apiKey: 'dummy-key',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4',
+      maxTokens: 512,
+      summaryTokenParam: 'max_completion_tokens',
+      summaryStreaming: false,
+      summaryJsonMode: true
+    });
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            summary: { tr: 'Güvenli test özeti' },
+            keyIdeas: [],
+            sections: [],
+            actionItems: [],
+            importantTerms: [],
+            warnings: []
+          })
+        },
+        finish_reason: 'stop'
+      }]
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    }));
+
+    const result = await provider.testConnection(undefined, 'summary');
+    const requestBody = JSON.parse(
+      (globalThis.fetch as any).mock.calls[0][1].body
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.message).not.toContain('Güvenli test özeti');
+    expect(requestBody.max_completion_tokens).toBe(512);
+    expect(requestBody.max_tokens).toBeUndefined();
+    expect(requestBody.response_format).toEqual({ type: 'json_object' });
+  });
+
+  it('tests the selected correction request format', async () => {
+    (AISettingsService.getProviderConfig as any).mockResolvedValue({
+      apiKey: 'dummy-key',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'gpt-4',
+      correctionMaxTokens: 1024,
+      correctionTokenParam: 'max_tokens',
+      correctionStreaming: false,
+      correctionJsonMode: true
+    });
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            sentences: [{
+              from: 0,
+              to: 0,
+              tr: 'Bu bir testtir.',
+              en: 'This is a test.'
+            }]
+          })
+        },
+        finish_reason: 'stop'
+      }]
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    }));
+
+    const result = await provider.testConnection(undefined, 'correction');
+    const requestBody = JSON.parse(
+      (globalThis.fetch as any).mock.calls[0][1].body
+    );
+
+    expect(result.success).toBe(true);
+    expect(requestBody.max_tokens).toBe(1024);
+    expect(requestBody.stream).toBeUndefined();
+    expect(requestBody.response_format).toEqual({ type: 'json_object' });
+  });
+
+  it('does not use reasoning_content as the final summary', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: '',
+          reasoning_content: 'Private reasoning is not a final answer.'
+        },
+        finish_reason: 'stop'
+      }]
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    }));
+
+    await expect(provider.summarize(dummyRequest, {})).rejects.toMatchObject({
+      code: 'INVALID_RESPONSE'
+    });
+  });
+
+  it('does not expose an HTTP error response body in diagnostics', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: {
+        code: 'provider_error',
+        message: 'secret response detail'
+      }
+    }), {
+      status: 500,
+      statusText: 'Server Error',
+      headers: { 'content-type': 'application/json' }
+    }));
+
+    try {
+      await provider.summarize(dummyRequest, {});
+      expect.fail('Expected provider error');
+    } catch (error: any) {
+      expect(error.debugMessage || '').not.toContain('secret response detail');
+      expect(error.statusCode).toBe(500);
+    }
+  });
 });
