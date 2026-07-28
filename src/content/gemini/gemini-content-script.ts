@@ -6,6 +6,10 @@
  */
 
 import { GemAutomationRequest } from '../../gem/types';
+import {
+  evaluateResponseSnapshot,
+  type ResponseBaseline
+} from './response-detector';
 
 // Element bulma öncelikleri
 function findPromptInput(): HTMLElement | null {
@@ -154,9 +158,7 @@ function isLoginPage(): boolean {
     !!document.querySelector('input[type="email"], input[type="password"]');
 }
 
-interface BaselineState {
-  modelTurnCount: number;
-  lastResponseText: string;
+interface BaselineState extends ResponseBaseline {
   lastResponseElement: HTMLElement | null;
 }
 
@@ -169,7 +171,8 @@ function captureResponseState(): BaselineState {
   );
   
   const lastElement = modelContainers.length > 0 ? modelContainers[modelContainers.length - 1] as HTMLElement : null;
-  const lastText = lastElement ? (lastElement.innerText?.trim() || lastElement.textContent?.trim() || '') : '';
+  const lastText = getLatestResponse() ||
+    (lastElement ? (lastElement.innerText?.trim() || lastElement.textContent?.trim() || '') : '');
   
   return {
     modelTurnCount: modelContainers.length,
@@ -222,8 +225,13 @@ function isStreamingActive(): boolean {
  * Yanıtın tamamlanmasını bekle.
  * Birden fazla sinyale dayanır: streaming durumu, DOM kararlılığı.
  */
-async function waitForResponse(options: { baseline: BaselineState; timeoutMs: number }): Promise<{ completed: boolean; text: string; diagnostics?: any } | { timeout: true; partialText: string; diagnostics?: any }> {
-  const { baseline, timeoutMs } = options;
+async function waitForResponse(options: {
+  baseline: BaselineState;
+  timeoutMs: number;
+  taskId: string;
+  videoId: string;
+}): Promise<{ completed: boolean; text: string; diagnostics?: any } | { timeout: true; partialText: string; diagnostics?: any }> {
+  const { baseline, timeoutMs, taskId, videoId } = options;
   const startTime = Date.now();
   
   let generationStarted = false;
@@ -295,6 +303,8 @@ async function waitForResponse(options: { baseline: BaselineState; timeoutMs: nu
       // Report progress to background
       chrome.runtime.sendMessage({
         type: 'GEMINI_PROGRESS',
+        taskId,
+        videoId,
         payload: {
           status: 'waiting_response',
           message: 'Gemini yanıt üretiyor…',
@@ -307,15 +317,22 @@ async function waitForResponse(options: { baseline: BaselineState; timeoutMs: nu
       
       console.log(`[ZYouTube Gemini] Response progress { elapsedMs: ${elapsedMs}, responseCharacters: ${responseCharacters}, streamingActive: ${streaming}, stableForMs: ${stableForMs} }`);
 
-      // Completion conditions
-      if (
-        generationStarted &&
-        responseCharacters >= 50 &&
-        stableForMs >= 12000 &&
-        stablePollCount >= 4 &&
-        notStreamingPollCount >= 3 &&
-        currentElement && document.body.contains(currentElement)
-      ) {
+      const decision = evaluateResponseSnapshot({
+        baseline,
+        currentText: currentContent,
+        currentModelTurnCount: modelContainers.length,
+        currentElementChanged: Boolean(
+          currentElement && currentElement !== baseline.lastResponseElement
+        ),
+        streamingActive: streaming,
+        stableForMs,
+        stablePollCount,
+        notStreamingPollCount,
+        generationAlreadyStarted: generationStarted
+      });
+      generationStarted = decision.generationStarted;
+
+      if (decision.completed) {
         console.log(`[ZYouTube Gemini] Response completed { elapsedMs: ${elapsedMs}, responseCharacters: ${responseCharacters}, stableForMs: ${stableForMs} }`);
         return {
           completed: true,
@@ -525,7 +542,9 @@ function registerGeminiMessageListener() {
       // Yanıt bekle
       const response = await waitForResponse({
         baseline,
-        timeoutMs: message.timeoutMs || 600000
+        timeoutMs: message.timeoutMs || 600000,
+        taskId: message.taskId,
+        videoId: message.videoId
       });
       
       if ('completed' in response && response.completed) {

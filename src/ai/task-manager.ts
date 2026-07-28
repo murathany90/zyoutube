@@ -6,6 +6,7 @@ import { AISettingsService } from '../settings/ai-settings';
 import { SummaryCache } from './cache';
 import { GemController } from '../gem/controller';
 import { SummaryEngine } from '../gem/types';
+import { normalizeGeminiSummary } from '../gem/result-normalizer';
 
 export class AITaskManager {
   private static tasks: Map<string, AITask> = new Map();
@@ -200,23 +201,12 @@ export class AITaskManager {
     });
 
     if (gemResult.success && gemResult.response) {
-      const result: SummaryResult = {
-        schemaVersion: 1,
+      const result = normalizeGeminiSummary(gemResult.response, {
         taskId: request.taskId,
         videoId: request.video.videoId,
-        providerId: 'gemini-gem',
-        model: 'gemini-gem',
         outputLanguage: request.options.outputLanguage,
-        summaryLength: request.options.length,
-        createdAt: new Date().toISOString(),
-        summary: { tr: gemResult.response },
-        keyIdeas: [],
-        sections: [],
-        actionItems: [],
-        importantTerms: [],
-        warnings: [],
-        rawResponseStored: false,
-      };
+        summaryLength: request.options.length
+      });
       this.updateStatus(task.taskId, 'completed', onProgress);
       this.cleanup(task.taskId);
       return result;
