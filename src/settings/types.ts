@@ -38,6 +38,8 @@ export interface AIProviderConfig {
   correctionJsonMode?: boolean;
   correctionMaxTokens?: number;
   correctionStreaming?: boolean;
+  correctionStreamOptions?: boolean;
+  correctionTokenParam?: 'max_tokens' | 'max_completion_tokens';
   correctionEnableReasoning?: boolean;
 }
 
@@ -72,6 +74,8 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
       correctionJsonMode: true,
       correctionMaxTokens: 130000,
       correctionStreaming: true,
+      correctionStreamOptions: true,
+      correctionTokenParam: 'max_tokens',
       correctionEnableReasoning: false
     },
     'chrome-local': {

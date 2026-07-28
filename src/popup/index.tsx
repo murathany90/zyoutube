@@ -13,6 +13,7 @@ import { LibraryService, VideoLibraryEntry } from '../history/library-service';
 import { PromptBuilder } from '../ai/prompt-builder';
 import { SummaryRequest } from '../ai/types';
 import { CorrectionPromptBuilder } from '../ai/prompt-correction';
+import { getPopupRoot } from './popup-root';
 
 // ─── Toggle Component ──────────────────────────────
 
@@ -763,8 +764,6 @@ const Popup = () => {
   );
 };
 
-const container = document.getElementById('app-root');
-if (container) {
-  const root = createRoot(container);
-  root.render(<Popup />);
-}
+const container = getPopupRoot(document);
+const root = createRoot(container);
+root.render(<Popup />);

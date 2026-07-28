@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { YouTubeTranscriptProvider, TranscriptResult, CaptionTrack } from '../transcript';
 import { CorrectionDB } from '../transcript/correction-db';
+import { CORRECTION_SAVE_FAILED_MESSAGE } from './correction-ui-messages';
 import { CorrectedBilingualSentence } from '../settings/types';
 import { sendRuntimeMessage } from './runtime-messenger';
 import { WordDictionaryPopup } from './components/WordDictionaryPopup';
@@ -275,7 +276,17 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
             setCorrectionSuccessMsg(`Düzeltme tamamlandı: ${enrichedSentences.length} anlamlı çift dilli cümle oluşturuldu.`);
           }
           setTimeout(() => setCorrectionSuccessMsg(null), 5000);
-        }).catch(console.error);
+        }).catch((err) => {
+          console.error('CorrectionDB.set failed', err);
+          setIsCorrecting(false);
+          setPendingCorrection(false);
+          setCorrectionProgress(null);
+          setIsCancelling(false);
+          activeCorrectionTaskIdRef.current = null;
+          setCorrectedSentences(enrichedSentences);
+          setCorrectionMode('both');
+          setCorrectionError(CORRECTION_SAVE_FAILED_MESSAGE);
+        });
 
       } else if (message.type === 'CORRECTION_FAILED') {
         const error = message.error;
@@ -342,8 +353,18 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
             parentSignal.addEventListener('abort', onParentAbort);
           }
 
-          // Fetch primary language (Turkish)
-          const resTr = await providerRef.current.fetchTranscript(videoId, trackToLoad, abortTr, tlangTr);
+          // Fetch primary language (Turkish). If translated captions are unavailable,
+          // keep the original track visible instead of failing the whole tab.
+          let resTr: TranscriptResult;
+          try {
+            resTr = await providerRef.current.fetchTranscript(videoId, trackToLoad, abortTr, tlangTr);
+          } catch (trErr: any) {
+            if (trErr.name === 'AbortError') throw trErr;
+            if (!tlangTr) throw trErr;
+            console.warn('ZYouTube: Türkçe çeviri alınamadı, orijinal transkript gösteriliyor:', trErr.message);
+            if (active) setDualLangWarning('Türkçe çeviri alınamadı. Orijinal transkript gösteriliyor.');
+            resTr = await providerRef.current.fetchTranscript(videoId, trackToLoad, abortTr);
+          }
           console.log(`[Transcript] primary received (dil: ${resTr.segments[0]?.languageCode}, segment: ${resTr.segments.length})`);
 
           
@@ -416,7 +437,15 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
           res = { ...resTr, segments: mergedSegments };
         } else {
           const tlang = trackToLoad.languageCode === displayLanguage ? undefined : displayLanguage;
-          res = await providerRef.current.fetchTranscript(videoId, trackToLoad, abortControllerRef.current || undefined, tlang);
+          try {
+            res = await providerRef.current.fetchTranscript(videoId, trackToLoad, abortControllerRef.current || undefined, tlang);
+          } catch (langErr: any) {
+            if (langErr.name === 'AbortError') throw langErr;
+            if (!tlang) throw langErr;
+            console.warn('ZYouTube: Seçilen dil çevirisi alınamadı, orijinal transkript gösteriliyor:', langErr.message);
+            if (active) setDualLangWarning('Seçilen dil çevirisi alınamadı. Orijinal transkript gösteriliyor.');
+            res = await providerRef.current.fetchTranscript(videoId, trackToLoad, abortControllerRef.current || undefined);
+          }
         }
 
         if (active) {

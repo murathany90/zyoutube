@@ -195,5 +195,19 @@ describe('CorrectionResponseParser', () => {
         expect(err.message).toContain('4. cümle için İngilizce çıktı üretilemedi');
       }
     });
+
+    it('parse edilen from/to cümlelerinde fallback uyarısı NaN yerine sıra numarası kullanır', () => {
+      const parsed = CorrectionResponseParser.parse(JSON.stringify({
+        sentences: [
+          { from: 0, to: 0, tr: 'TR', en: '' }
+        ]
+      }));
+      const segs = [{ id: 'seg-1', startTimeMs: 0, endTimeMs: 1000, turkish: 'TR', english: 'Original EN' }];
+
+      const enriched = CorrectionResponseParser.enrichCorrectedSentences(parsed, segs, 'tr');
+
+      expect(enriched[0].warnings).toContain('1. cümlede yapay zekâ İngilizce çıktı üretmedi; orijinal İngilizce metin kullanıldı.');
+      expect(enriched[0].warnings?.join(' ')).not.toContain('NaN');
+    });
   });
 });

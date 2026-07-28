@@ -269,7 +269,7 @@ describe('api-worker SSE and HTTP logic', () => {
         taskId: 'task-1',
         videoId: 'video-1',
         request: { transcript: { segments: [{ id: '1', text: 'test' }] }, options: {}, video: { title: 'Test Video' } },
-        config: { baseUrl: 'http://test', apiKey: 'key', model: 'test-model', correctionEnableReasoning: true, stream: false }
+        config: { baseUrl: 'http://test', apiKey: 'key', model: 'test-model', correctionEnableReasoning: true, correctionStreaming: false }
       },
       {},
       vi.fn()
@@ -279,6 +279,59 @@ describe('api-worker SSE and HTTP logic', () => {
     const calls = chromeMock.runtime.sendMessage.mock.calls;
     const failedCall = calls.find((c: any) => c[0].type === 'API_CORRECTION_FAILED');
     expect(failedCall![0].error.code).toBe('CORRECTION_FINAL_CONTENT_MISSING');
+  });
+
+  it('8b. streaming yalnız reasoning_content → CORRECTION_FINAL_CONTENT_MISSING', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      body: createMockStream([
+        'data: {"choices":[{"delta":{"reasoning_content":"thinking..."}}]}\n\n',
+        'data: {"choices":[{"delta":{}, "finish_reason": "stop"}]}\n\n'
+      ])
+    });
+
+    sendCorrectionStart(true);
+    await vi.runAllTimersAsync();
+
+    const calls = chromeMock.runtime.sendMessage.mock.calls;
+    const failedCall = calls.find((c: any) => c[0].type === 'API_CORRECTION_FAILED');
+    expect(failedCall![0].error.code).toBe('CORRECTION_FINAL_CONTENT_MISSING');
+    expect(failedCall![0].error.responseCharacters).toBe(0);
+  });
+
+  it('9b. HTTP hata diagnostics yalniz guvenli metadata tasir', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      headers: new Headers({
+        'content-type': 'application/json',
+        'x-request-id': 'request-safe-123'
+      }),
+      text: () => Promise.resolve(JSON.stringify({
+        error: {
+          code: 'invalid_api_key',
+          type: 'authentication_error',
+          message: 'TEST_SECRET_DO_NOT_LEAK_12345'
+        }
+      }))
+    });
+
+    sendCorrectionStart();
+    await vi.runAllTimersAsync();
+
+    const calls = chromeMock.runtime.sendMessage.mock.calls;
+    const failedCall = calls.find((c: any) => c[0].type === 'API_CORRECTION_FAILED');
+    expect(JSON.stringify(failedCall![0].error)).not.toContain('TEST_SECRET_DO_NOT_LEAK_12345');
+    expect(failedCall![0].error.diagnostics).toMatchObject({
+      httpStatus: 401,
+      providerErrorCode: 'invalid_api_key',
+      providerErrorType: 'authentication_error',
+      requestId: 'request-safe-123',
+      contentType: 'application/json'
+    });
+    expect(failedCall![0].error.diagnostics).not.toHaveProperty('bodyPreview');
+    expect(failedCall![0].error.diagnostics).not.toHaveProperty('bodyPreviewRedacted');
   });
 
   it('9. HTTP 504 → CORRECTION_HTTP_504 / http', async () => {
@@ -342,4 +395,3 @@ describe('api-worker SSE and HTTP logic', () => {
     expect(failedCall![0].error.code).toBe('API_ERROR'); // NOT CORRECTION_HTTP_ERROR
   });
 });
-
