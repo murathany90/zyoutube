@@ -33,6 +33,7 @@ export interface GemSummaryResult {
 export class GemController {
   private static statusCallbacks: Map<string, (info: GemStatusInfo) => void> = new Map();
   private static abortControllers: Map<string, AbortController> = new Map();
+  private static inFlightSummaries: Map<string, Promise<GemSummaryResult>> = new Map();
 
   static onStatusChange(taskId: string, callback: (info: GemStatusInfo) => void) {
     this.statusCallbacks.set(taskId, callback);
@@ -53,9 +54,24 @@ export class GemController {
     this.statusCallbacks.delete(taskId);
   }
 
-  static async summarize(request: GemSummaryRequest): Promise<GemSummaryResult> {
+  static summarize(request: GemSummaryRequest): Promise<GemSummaryResult> {
+    const existing = this.inFlightSummaries.get(request.taskId);
+    if (existing) return existing;
+
+    const operation = this.runSummary(request);
+    const trackedOperation = operation.finally(() => {
+      if (this.inFlightSummaries.get(request.taskId) === trackedOperation) {
+        this.inFlightSummaries.delete(request.taskId);
+      }
+    });
+    this.inFlightSummaries.set(request.taskId, trackedOperation);
+    return trackedOperation;
+  }
+
+  private static async runSummary(request: GemSummaryRequest): Promise<GemSummaryResult> {
     const controller = new AbortController();
     this.abortControllers.set(request.taskId, controller);
+    let tabResult: { tabId: number; isNew: boolean } | null = null;
 
     try {
       // 1. Gem ayarlarını oku
@@ -104,7 +120,6 @@ export class GemController {
 
       // 5. Gem sekmesini bul veya aç
       this.emitStatus(request.taskId, 'tab_found', 'Gemini sekmesi aranıyor...');
-      let tabResult: { tabId: number; isNew: boolean };
       try {
         tabResult = await GemTabManager.openGemTab(gemSettings.gemUrl, gemSettings);
       } catch (e) {
@@ -119,7 +134,7 @@ export class GemController {
       const loaded = await GemTabManager.waitForTabLoad(tabResult.tabId, 20000);
       if (!loaded) {
         this.emitStatus(request.taskId, 'automation_failed', 'Gem sayfası yüklenemedi.');
-        return this.fallback(request.taskId, prompt, gemSettings);
+        return this.fallback(request.taskId, prompt, gemSettings, tabResult.tabId);
       }
 
       // Sayfa yüklendiğinde DOM'un hazır olması için ekstra bekleme
@@ -149,7 +164,7 @@ export class GemController {
           await chrome.tabs.sendMessage(tabResult.tabId, { type: 'GEM_AUTOMATION_PING' });
         } catch (e) {
           this.emitStatus(request.taskId, 'automation_failed', 'Content script başlatılamadı.');
-          return this.fallback(request.taskId, prompt, gemSettings);
+          return this.fallback(request.taskId, prompt, gemSettings, tabResult.tabId);
         }
       }
 
@@ -201,17 +216,17 @@ export class GemController {
         }
 
         // Genel otomasyon başarısızlığı
-        return this.fallback(request.taskId, prompt, gemSettings);
+        return this.fallback(request.taskId, prompt, gemSettings, tabResult.tabId);
       } catch (e) {
         // Content script erişilemedi veya hata verdi
-        return this.fallback(request.taskId, prompt, gemSettings);
+        return this.fallback(request.taskId, prompt, gemSettings, tabResult.tabId);
       }
     } catch (e: any) {
       if (e.message === 'AbortError') {
         this.emitStatus(request.taskId, 'automation_failed', 'İşlem iptal edildi.');
         return { success: false, fallbackUsed: false, status: 'automation_failed' };
       }
-      return this.fallback(request.taskId, '', {} as GemSettings);
+      return this.fallback(request.taskId, '', {} as GemSettings, tabResult?.tabId);
     } finally {
       this.abortControllers.delete(request.taskId);
       this.statusCallbacks.delete(request.taskId);
@@ -221,15 +236,20 @@ export class GemController {
   /**
    * Fallback: Panoya kopyala + görünür sekme + kullanıcıya bildir
    */
-  private static async fallback(taskId: string, _prompt: string, gemSettings: GemSettings): Promise<GemSummaryResult> {
+  private static async fallback(
+    taskId: string,
+    _prompt: string,
+    gemSettings: GemSettings,
+    tabId?: number
+  ): Promise<GemSummaryResult> {
     this.emitStatus(taskId, 'user_action_needed', 'Otomasyon tamamlanamadı. Panoya kopyalandı.');
 
-    // Görünür sekmede Gem URL'yi aç
-    if (gemSettings.fallbackToVisibleTab && gemSettings.gemUrl) {
+    // Seçilmiş sekmeyi görünür yap; fallback ikinci bir sekme oluşturmamalı.
+    if (gemSettings.fallbackToVisibleTab && tabId !== undefined) {
       try {
-        await chrome.tabs.create({ url: gemSettings.gemUrl, active: true });
+        await chrome.tabs.update(tabId, { active: true });
       } catch {
-        // Sekme açılamadı
+        // Sekme artık açık olmayabilir.
       }
     }
 

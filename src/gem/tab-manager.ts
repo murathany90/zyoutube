@@ -43,23 +43,21 @@ export class GemTabManager {
   /**
    * Yeni Gemini sekmesi aç veya mevcut olanı kullan.
    */
-  static async openGemTab(gemUrl: string, settings: GemSettings): Promise<{ tabId: number; isNew: boolean }> {
+  static async openGemTab(gemUrl: string, _settings: GemSettings): Promise<{ tabId: number; isNew: boolean }> {
     // Önce mevcut Gemini sekmesini bulmayı dene
-    if (!settings.newChatPerVideo) {
-      const existing = await this.findMatchingGemTab(gemUrl);
-      if (existing) {
-        // Mevcut sekmeyi doğru URL'ye yönlendir (gerekirse)
-        try {
-          const currentTab = await chrome.tabs.get(existing.tabId);
-          if (currentTab.url !== gemUrl) {
-            await chrome.tabs.update(existing.tabId, { url: gemUrl });
-          }
-          // Sekmeyi arka planda tut (aktif yapma)
-          await chrome.tabs.update(existing.tabId, { active: false });
-          return { tabId: existing.tabId, isNew: false };
-        } catch {
-          // Sekme artık yoksa veya erişilemiyorsa yeni aç
+    const existing = await this.findMatchingGemTab(gemUrl);
+    if (existing) {
+      // Mevcut sekmeyi doğru URL'ye yönlendir (gerekirse)
+      try {
+        const currentTab = await chrome.tabs.get(existing.tabId);
+        if (currentTab.url !== gemUrl) {
+          await chrome.tabs.update(existing.tabId, { url: gemUrl });
         }
+        // Sekmeyi arka planda tut (aktif yapma)
+        await chrome.tabs.update(existing.tabId, { active: false });
+        return { tabId: existing.tabId, isNew: false };
+      } catch {
+        // Sekme artık yoksa veya erişilemiyorsa yeni aç
       }
     }
 
