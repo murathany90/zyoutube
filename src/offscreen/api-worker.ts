@@ -66,15 +66,27 @@ export function createCorrectionError(
   return error;
 }
 
-export function classifyCorrectionError(normalized: NormalizedCorrectionError): { stage: string } {
+export function classifyCorrectionError(normalized: NormalizedCorrectionError): { code: string, stage: string, retryable: boolean } {
     let stage = 'unknown';
-    if (normalized.code === 'CORRECTION_HTTP_ERROR' || normalized.code === 'CORRECTION_HTTP_504' || normalized.code.startsWith('HTTP_')) stage = 'http';
-    else if (normalized.code === 'CORRECTION_STREAM_READ_FAILED' || normalized.code.includes('STREAM_')) stage = 'streaming';
-    else if (normalized.code === 'CORRECTION_EMPTY_RESPONSE' || normalized.code === 'CORRECTION_JSON_PARSE_FAILED') stage = 'parsing';
-    else if (['CORRECTION_SCHEMA_INVALID', 'CORRECTION_RANGE_INVALID', 'CORRECTION_LANGUAGE_MISSING', 'CORRECTION_SEGMENT_COVERAGE_INVALID'].includes(normalized.code)) stage = 'validation';
-    else if (normalized.name === 'AbortError' || normalized.message === 'AbortError') normalized.code = 'CORRECTION_CANCELLED';
-    else if (normalized.message === 'Timeout') normalized.code = 'CORRECTION_TIMEOUT';
-    return { stage };
+    let code = normalized.code;
+    
+    if (normalized.name === 'AbortError' || normalized.message === 'AbortError') {
+      code = 'CORRECTION_CANCELLED';
+    } else if (normalized.message === 'Timeout') {
+      code = 'CORRECTION_TIMEOUT';
+    }
+
+    if (code === 'CORRECTION_HTTP_ERROR' || code === 'CORRECTION_HTTP_504' || code.startsWith('HTTP_')) stage = 'http';
+    else if (code === 'CORRECTION_STREAM_READ_FAILED' || code.includes('STREAM_')) stage = 'streaming';
+    else if (code === 'CORRECTION_EMPTY_RESPONSE' || code === 'CORRECTION_JSON_PARSE_FAILED' || code === 'CORRECTION_FINAL_CONTENT_MISSING') stage = 'parsing';
+    else if (['CORRECTION_SCHEMA_INVALID', 'CORRECTION_RANGE_INVALID', 'CORRECTION_LANGUAGE_MISSING', 'CORRECTION_SEGMENT_COVERAGE_INVALID'].includes(code)) stage = 'validation';
+    else if (code === 'CORRECTION_CANCELLED') stage = 'cancelled';
+    else if (code === 'CORRECTION_TIMEOUT') stage = 'timeout';
+    else code = 'CORRECTION_UNKNOWN';
+    
+    const retryable = code !== 'CORRECTION_CANCELLED' && code !== 'CORRECTION_TIMEOUT';
+    
+    return { code, stage, retryable };
 }
 
 interface TaskContext {
@@ -198,23 +210,14 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
 
     if (!response.ok) {
       let preview = response.statusText;
-      let contentType = response.headers.get('content-type') || 'unknown';
       try {
         const rawText = await response.text();
         preview = rawText.slice(0, 500);
       } catch { /* ignore */ }
       
-      const is504 = response.status === 504;
-      throw createCorrectionError(
-        is504 ? 'CORRECTION_HTTP_504' : 'CORRECTION_HTTP_ERROR',
-        is504 ? "API sağlayıcısı düzeltme isteğini zamanında tamamlayamadı (504)." : `Bağlantı hatası: ${response.status}`,
-        {
-          status: response.status,
-          statusText: response.statusText,
-          contentType: contentType,
-          bodyPreview: preview
-        }
-      );
+      const err = new Error(`API error: ${response.status} ${response.statusText} - ${preview}`);
+      (err as any).code = 'API_ERROR';
+      throw err;
     }
 
     let aiResponseText = '';
@@ -298,7 +301,7 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
     const isTimeout = e.message === 'Timeout';
     const isAbort = e.name === 'AbortError' || e.message === 'AbortError';
     
-    const errorCode = isAbort ? 'REQUEST_CANCELLED' : (isTimeout ? 'TIMEOUT' : 'UNKNOWN_ERROR');
+    const errorCode = isAbort ? 'REQUEST_CANCELLED' : (isTimeout ? 'TIMEOUT' : (e.code || 'UNKNOWN_ERROR'));
     const userMsg = isAbort ? 'İstek kullanıcı tarafından iptal edildi.' : (isTimeout ? 'İstek zaman aşımına uğradı. İşlem çok uzun sürdü.' : (e.message || 'Beklenmeyen bir hata oluştu.'));
     
     chrome.runtime.sendMessage({
@@ -362,6 +365,14 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
   chrome.runtime.sendMessage({ type: 'API_CORRECTION_ACCEPTED', taskId }).catch(console.error);
   resetIdleTimer();
 
+  let aiResponseText = '';
+  let finishReason = '';
+  let reasoningContent = '';
+  let streamDoneReceived = false;
+  let sseEventCount = 0;
+  let contentChunkCount = 0;
+  let contentType = 'string';
+
   try {
     console.log(`[API Task] offscreen correction started for task ${taskId}`);
     
@@ -408,26 +419,37 @@ model: ${body.model}`);
     console.log(`[API Task] correction HTTP status: ${response.status}`);
 
     if (!response.ok) {
-      if (response.status === 504) {
-        throw new Error(
-          "API sağlayıcısı düzeltme isteğini zamanında tamamlayamadı (504). " +
-          "Bu eklenti timeout'u değildir. Streaming açık ve düzeltme reasoning " +
-          "kapalı olarak tekrar deneyin."
-        );
-      }
-      let errorMsg = response.statusText;
+      let preview = response.statusText;
+      let respContentType = response.headers.get('content-type') || 'unknown';
       try {
         const rawText = await response.text();
-        const errorData = JSON.parse(rawText);
-        errorMsg = errorData?.error?.message || errorData?.message || rawText.slice(0, 500);
+        preview = rawText.slice(0, 500);
       } catch { /* ignore */ }
-      throw new Error(`Bağlantı hatası: ${response.status} ${errorMsg}`);
-    }
 
-    let aiResponseText = '';
-    let finishReason = '';
-    let reasoningContent = '';
-    let contentType = 'string';
+      if (response.status === 504) {
+        throw createCorrectionError(
+          'CORRECTION_HTTP_504',
+          'API sağlayıcısı düzeltme isteğini zamanında tamamlayamadı (504).',
+          {
+            httpStatus: response.status,
+            statusText: response.statusText,
+            contentType: respContentType,
+            bodyPreview: preview
+          }
+        );
+      } else {
+        throw createCorrectionError(
+          'CORRECTION_HTTP_ERROR',
+          `Düzeltme API isteği başarısız oldu: ${response.status}`,
+          {
+            httpStatus: response.status,
+            statusText: response.statusText,
+            contentType: respContentType,
+            bodyPreview: preview
+          }
+        );
+      }
+    }
 
     if (body.stream && response.body) {
       const reader = response.body.getReader();
@@ -436,34 +458,47 @@ model: ${body.model}`);
       let lastProgressTime = performance.now();
       let buffer = '';
 
+      function processCorrectionSseLine(line: string): void {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) return;
+        const dataStr = trimmed.slice(5).trim();
+        
+        if (dataStr === '[DONE]') {
+          streamDoneReceived = true;
+          return;
+        }
+        
+        try {
+          const data = JSON.parse(dataStr);
+          sseEventCount += 1;
+          const content = data.choices?.[0]?.delta?.content;
+          if (content) {
+            aiResponseText += content;
+            contentChunkCount += 1;
+          }
+          if (data.choices?.[0]?.finish_reason) {
+            finishReason = data.choices[0].finish_reason;
+          }
+        } catch { /* ignore */ }
+      }
+
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        
+        if (done) {
+          if (buffer.trim()) {
+            processCorrectionSseLine(buffer);
+          }
+          break;
+        }
         
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
         buffer = lines.pop() || '';
         
         for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith('data: ')) continue;
-          const dataStr = trimmed.slice(6);
-          if (dataStr === '[DONE]') continue;
-          
-          try {
-            const data = JSON.parse(dataStr);
-            const content = data.choices?.[0]?.delta?.content;
-            if (content) {
-              aiResponseText += content;
-            }
-            if (data.choices?.[0]?.finish_reason) {
-              finishReason = data.choices[0].finish_reason;
-            }
-          } catch (e) {
-            // ignore
-          }
+          processCorrectionSseLine(line);
         }
-        
         const now = performance.now();
         if (now - lastProgressTime >= 10000) {
           lastProgressTime = now;
@@ -510,12 +545,20 @@ model: ${body.model}`);
     
     console.log(logMessage);
 
-    if (body.stream && !finishReason && aiResponseText.length > 0) {
-      throw createCorrectionError('CORRECTION_STREAM_READ_FAILED', 'Stream [DONE] gelmeden kapandı.');
-    }
-    
-    if (!aiResponseText || aiResponseText.trim() === '') {
-      throw createCorrectionError('CORRECTION_EMPTY_RESPONSE', 'Stream tamamlanıp içerik boş döndü.');
+    const streamCompleted = streamDoneReceived || Boolean(finishReason);
+
+    if (body.stream && !streamCompleted) {
+      throw createCorrectionError(
+        'CORRECTION_STREAM_READ_FAILED',
+        'API yanıt akışı tamamlanma işareti olmadan kapandı.',
+        {
+          streamDoneReceived,
+          finishReason,
+          sseEventCount,
+          contentChunkCount,
+          responseCharacters: aiResponseText.length
+        }
+      );
     }
     
     if (finishReason === 'length') {
@@ -527,9 +570,9 @@ model: ${body.model}`);
     
     if (!aiResponseText || aiResponseText.trim() === '') {
       if (reasoningContent && reasoningContent.trim() !== '') {
-        throw new Error("Model yalnızca akıl yürütme içeriği döndürdü; nihai JSON cevap bulunamadı.");
+        throw createCorrectionError('CORRECTION_FINAL_CONTENT_MISSING', "Model yalnızca akıl yürütme içeriği döndürdü; nihai JSON cevap bulunamadı.");
       }
-      throw new Error("EMPTY_API_RESPONSE: API yanıtı içerik barındırmıyor.");
+      throw createCorrectionError('CORRECTION_EMPTY_RESPONSE', "API yanıtı içerik barındırmıyor.");
     }
 
     chrome.runtime.sendMessage({
@@ -566,47 +609,51 @@ model: ${body.model}`);
     });
     
   } catch (e: any) {
-    const isTimeout = e.message === 'Timeout';
-    const isAbort = e.name === 'AbortError' || e.message === 'AbortError';
+    const normalized = normalizeUnknownError(e);
+    const { code, stage, retryable } = classifyCorrectionError(normalized);
     
-    let stage = 'unknown';
-    let errorCode = isAbort ? 'REQUEST_CANCELLED' : (isTimeout ? 'TIMEOUT' : 'UNKNOWN_ERROR');
+    let userMsg = normalized.message;
+    if (code === 'CORRECTION_CANCELLED') userMsg = 'İstek iptal edildi.';
+    else if (code === 'CORRECTION_TIMEOUT') userMsg = 'İstek zaman aşımına uğradı.';
     
-    if (e.code === 'CORRECTION_LANGUAGE_MISSING' || e.message.includes('Düzeltme sonucu geçersiz') || e.message.includes('Aralık')) {
-      stage = 'validation';
-      if (e.code) errorCode = e.code;
-    } else if (e.message.includes('JSON olarak ayrıştırılamadı') || e.message.includes('sentences dizisi bulunamadı') || e.message.includes('işlenirken hata oluştu')) {
-      stage = 'parsing';
-    } else if (e.message.includes('Bağlantı hatası')) {
-      stage = 'http';
-    } else if (e.message.includes('stream') || e.message.includes('JSON yanıt akışı')) {
-      stage = 'streaming';
-    }
-    
-    const userMsg = isAbort ? 'İstek iptal edildi.' : (isTimeout ? 'İstek zaman aşımına uğradı.' : (e.message || 'Beklenmeyen hata.'));
-    
-    console.error("[ZYouTube Correction Error]", {
+    const logData = {
       taskId,
       videoId,
+      code,
       stage,
-      errorCode,
-      message: e.message,
-      model: config.model,
+      message: normalized.message,
+      model: config.model || 'unknown',
+      httpStatus:
+        normalized.diagnostics?.httpStatus ??
+        normalized.diagnostics?.status ??
+        null,
+      finishReason: finishReason || null,
+      streamDoneReceived,
+      sseEventCount,
+      contentChunkCount,
+      responseCharacters: aiResponseText.length,
       elapsedMs: Math.round(performance.now() - startedAt),
-      diagnostics: e.diagnostics
-    });
+      diagnostics: normalized.diagnostics || null
+    };
+
+    console.error(`[ZYouTube Correction Error]\n${JSON.stringify(logData, null, 2)}`);
     
     chrome.runtime.sendMessage({
         type: 'API_CORRECTION_FAILED',
         taskId,
         videoId,
         error: {
-            code: errorCode,
+            code,
             stage,
             userMessage: userMsg,
-            technicalMessage: e.message,
-            diagnostics: e.diagnostics,
-            retryable: !isAbort
+            technicalMessage: normalized.message,
+            diagnostics: normalized.diagnostics || {},
+            httpStatus: logData.httpStatus,
+            finishReason: logData.finishReason,
+            streamDoneReceived: logData.streamDoneReceived,
+            responseCharacters: logData.responseCharacters,
+            elapsedMs: logData.elapsedMs,
+            retryable
         }
     }).catch(err => console.error(err));
   } finally {

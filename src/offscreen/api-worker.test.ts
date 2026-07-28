@@ -1,14 +1,15 @@
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 
 const chromeMock = {
   runtime: {
     onMessage: {
       addListener: vi.fn()
     },
-    sendMessage: vi.fn()
+    sendMessage: vi.fn().mockResolvedValue({})
   }
 };
 (globalThis as any).chrome = chromeMock;
+(globalThis as any).window = globalThis;
 
 // Import will be hoisted anyway... wait, we need an await import inside beforeAll
 let normalizeUnknownError: any;
@@ -103,3 +104,242 @@ describe('api-worker error logic', () => {
     });
   });
 });
+
+describe('api-worker SSE and HTTP logic', () => {
+  let messageListener: any;
+  let fetchMock: any;
+
+  beforeAll(async () => {
+    // Dinleyiciyi yakala
+    messageListener = chromeMock.runtime.onMessage.addListener.mock.calls[0][0];
+  });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchMock = vi.fn();
+    globalThis.fetch = fetchMock;
+    chromeMock.runtime.sendMessage.mockClear();
+  });
+  
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const sendCorrectionStart = (reasoning = false) => {
+    return messageListener(
+      {
+        type: 'API_CORRECTION_START',
+        taskId: 'task-1',
+        videoId: 'video-1',
+        request: { transcript: { segments: [{ id: '1', text: 'test' }] }, options: {}, video: { title: 'Test Video' } },
+        config: { baseUrl: 'http://test', apiKey: 'key', model: 'test-model', correctionEnableReasoning: reasoning, stream: true }
+      },
+      {},
+      vi.fn()
+    );
+  };
+
+  const createMockStream = (chunks: string[], autoClose = true) => {
+    const encoder = new TextEncoder();
+    let index = 0;
+    return {
+      getReader: () => ({
+        read: vi.fn().mockImplementation(() => {
+          if (index < chunks.length) {
+            return Promise.resolve({ done: false, value: encoder.encode(chunks[index++]) });
+          }
+          return Promise.resolve({ done: autoClose, value: undefined });
+        })
+      })
+    };
+  };
+
+  const validJsonContent = '{"sentences":[{"from":0,"to":0,"tr":"test","en":"test"}]}';
+
+  it('1. [DONE] var, finish_reason yok → stream başarılı', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      body: createMockStream([`data: {"choices":[{"delta":{"content":${JSON.stringify(validJsonContent)}}}]}\n\n`, 'data: [DONE]\n\n'])
+    });
+    
+    sendCorrectionStart();
+    await vi.runAllTimersAsync();
+    
+    const calls = chromeMock.runtime.sendMessage.mock.calls;
+    const completedCall = calls.find((c: any) => c[0].type === 'API_CORRECTION_COMPLETED');
+     expect(completedCall).toBeDefined();
+  });
+
+  it('2. finish_reason=stop var, [DONE] yok → stream başarılı', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      body: createMockStream([`data: {"choices":[{"delta":{"content":${JSON.stringify(validJsonContent)}}, "finish_reason": "stop"}]}\n\n`])
+    });
+    
+    sendCorrectionStart();
+    await vi.runAllTimersAsync();
+    
+    const calls = chromeMock.runtime.sendMessage.mock.calls;
+    const completedCall = calls.find((c: any) => c[0].type === 'API_CORRECTION_COMPLETED');
+    expect(completedCall).toBeDefined();
+  });
+
+  it('3. [DONE] ve finish_reason yok → bağlantı kapanırsa stream hatası', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      body: createMockStream([`data: {"choices":[{"delta":{"content":"A"}}]}\n\n`])
+    });
+    
+    sendCorrectionStart();
+    await vi.runAllTimersAsync();
+    
+    const calls = chromeMock.runtime.sendMessage.mock.calls;
+    const failedCall = calls.find((c: any) => c[0].type === 'API_CORRECTION_FAILED');
+    expect(failedCall![0].error.code).toBe('CORRECTION_STREAM_READ_FAILED');
+  });
+
+  it('4. Son SSE event newline olmadan gelir → işlenir', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      body: createMockStream([`data: {"choices":[{"delta":{"content":${JSON.stringify(validJsonContent)}}, "finish_reason": "stop"}]}`]) // No newline
+    });
+    
+    sendCorrectionStart();
+    await vi.runAllTimersAsync();
+    
+    const calls = chromeMock.runtime.sendMessage.mock.calls;
+    const completedCall = calls.find((c: any) => c[0].type === 'API_CORRECTION_COMPLETED');
+    expect(completedCall).toBeDefined();
+  });
+
+  it('5. data:{...} biçimi → işlenir', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      body: createMockStream([`data:{"choices":[{"delta":{"content":${JSON.stringify(validJsonContent)}}, "finish_reason": "stop"}]}\n\n`])
+    });
+    
+    sendCorrectionStart();
+    await vi.runAllTimersAsync();
+    
+    const calls = chromeMock.runtime.sendMessage.mock.calls;
+    const completedCall = calls.find((c: any) => c[0].type === 'API_CORRECTION_COMPLETED');
+    expect(completedCall).toBeDefined();
+  });
+
+  it('6. data: {...} biçimi → işlenir', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      body: createMockStream([`data:  {"choices":[{"delta":{"content":${JSON.stringify(validJsonContent)}}, "finish_reason": "stop"}]}\n\n`])
+    });
+    
+    sendCorrectionStart();
+    await vi.runAllTimersAsync();
+    
+    const calls = chromeMock.runtime.sendMessage.mock.calls;
+    const completedCall = calls.find((c: any) => c[0].type === 'API_CORRECTION_COMPLETED');
+    expect(completedCall).toBeDefined();
+  });
+
+  it('7. boş content → CORRECTION_EMPTY_RESPONSE', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      body: createMockStream(['data: {"choices":[{"delta":{"content":""}, "finish_reason": "stop"}]}\n\n'])
+    });
+    
+    sendCorrectionStart();
+    await vi.runAllTimersAsync();
+    
+    const calls = chromeMock.runtime.sendMessage.mock.calls;
+    const failedCall = calls.find((c: any) => c[0].type === 'API_CORRECTION_FAILED');
+    expect(failedCall![0].error.code).toBe('CORRECTION_EMPTY_RESPONSE');
+  });
+
+  it('8. yalnız reasoning_content → CORRECTION_FINAL_CONTENT_MISSING', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+         choices: [{ message: { reasoning_content: "thinking...", content: "" }, finish_reason: "stop" }]
+      })
+    });
+    
+    // Non-streaming for reasoning check simulation
+    messageListener(
+      {
+        type: 'API_CORRECTION_START',
+        taskId: 'task-1',
+        videoId: 'video-1',
+        request: { transcript: { segments: [{ id: '1', text: 'test' }] }, options: {}, video: { title: 'Test Video' } },
+        config: { baseUrl: 'http://test', apiKey: 'key', model: 'test-model', correctionEnableReasoning: true, stream: false }
+      },
+      {},
+      vi.fn()
+    );
+    await vi.runAllTimersAsync();
+    
+    const calls = chromeMock.runtime.sendMessage.mock.calls;
+    const failedCall = calls.find((c: any) => c[0].type === 'API_CORRECTION_FAILED');
+    expect(failedCall![0].error.code).toBe('CORRECTION_FINAL_CONTENT_MISSING');
+  });
+
+  it('9. HTTP 504 → CORRECTION_HTTP_504 / http', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 504,
+      statusText: 'Gateway Timeout',
+      headers: new Headers(),
+      text: () => Promise.resolve('Timeout')
+    });
+    
+    sendCorrectionStart();
+    await vi.runAllTimersAsync();
+    
+    const calls = chromeMock.runtime.sendMessage.mock.calls;
+    const failedCall = calls.find((c: any) => c[0].type === 'API_CORRECTION_FAILED');
+    expect(failedCall![0].error.code).toBe('CORRECTION_HTTP_504');
+    expect(failedCall![0].error.stage).toBe('http');
+  });
+
+  it('10. object throw → logda [object Object] bulunmaz', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchMock.mockRejectedValue({ customError: 'Something failed' });
+    
+    sendCorrectionStart();
+    await vi.runAllTimersAsync();
+    
+    const calls = chromeMock.runtime.sendMessage.mock.calls;
+    const failedCall = calls.find((c: any) => c[0].type === 'API_CORRECTION_FAILED');
+    expect(failedCall![0].error.code).toBe('CORRECTION_UNKNOWN'); // NonErrorThrown becomes UNKNOWN
+    
+    const logStr = consoleErrorSpy.mock.calls.map(c => c.join(' ')).join('\n');
+    expect(logStr).not.toContain('[object Object]');
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('11. summary HTTP hatasında CORRECTION_* kodu kullanılmaz', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: 'Internal Error',
+      headers: new Headers(),
+      text: () => Promise.resolve('Error')
+    });
+    
+    messageListener(
+      {
+        type: 'API_SUMMARY_START',
+        taskId: 'task-sum-1',
+        videoId: 'video-1',
+        request: { transcript: { segments: [] }, options: {}, video: { title: 'Test Video' } },
+        config: { baseUrl: 'http://test', apiKey: 'key', model: 'test-model' }
+      },
+      {},
+      vi.fn()
+    );
+    await vi.runAllTimersAsync();
+    
+    const calls = chromeMock.runtime.sendMessage.mock.calls;
+    const failedCall = calls.find((c: any) => c[0].type === 'API_SUMMARY_FAILED');
+    expect(failedCall![0].error.code).toBe('API_ERROR'); // NOT CORRECTION_HTTP_ERROR
+  });
+});
+
