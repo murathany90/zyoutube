@@ -7,7 +7,7 @@ export interface SavedSummary {
   title: string;
   url: string;
   date: number; // timestamp
-  summary: SummaryResult;
+  summary?: SummaryResult;
   transcript: TranscriptSegment[];
 }
 
@@ -33,6 +33,27 @@ export class HistoryService {
   static async getSummary(id: string): Promise<SavedSummary | null> {
     const summaries = await this.getSummaries();
     return summaries.find(s => s.id === id) || null;
+  }
+
+  /**
+   * Belirli bir özeti videoId'ye göre getir
+   */
+  static async getSummaryByVideoId(videoId: string): Promise<SavedSummary | null> {
+    const summaries = await this.getSummaries();
+    return summaries.find(s => s.videoId === videoId) || null;
+  }
+
+  /**
+   * Belirli bir özeti videoId'ye göre sil
+   */
+  static async deleteSummaryByVideoId(videoId: string): Promise<void> {
+    const summaries = await this.getSummaries();
+    const filtered = summaries.filter(s => s.videoId !== videoId);
+    return new Promise((resolve) => {
+      chrome.storage.local.set({ [this.STORAGE_KEY]: filtered }, () => {
+        resolve();
+      });
+    });
   }
 
   /**

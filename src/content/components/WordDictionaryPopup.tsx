@@ -11,6 +11,8 @@ interface WordDictionaryPopupProps {
   timestampMs: number;
   correctedSentenceId?: string;
   position: { top: number; left: number };
+  positionMode?: 'panel' | 'viewport';
+  onSavedChange?: (saved: boolean, word: StudyWord | null) => void;
   onClose: () => void;
 }
 
@@ -33,6 +35,8 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
   timestampMs,
   correctedSentenceId,
   position,
+  positionMode = 'panel',
+  onSavedChange,
   onClose
 }) => {
   const [data, setData] = useState<DictionaryWordResult | null>(null);
@@ -104,9 +108,30 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
   }, [onClose]);
 
   useEffect(() => {
-    if (popupRef.current) {
+    if (positionMode === 'viewport' && popupRef.current) {
       const rect = popupRef.current.getBoundingClientRect();
-      // Enclosing container bounds
+      let newTop = position.top;
+      let newLeft = position.left;
+      
+      const width = Math.min(360, window.innerWidth - 24);
+      
+      if (newLeft + width > window.innerWidth - 12) {
+        newLeft = window.innerWidth - width - 12;
+      }
+      if (newLeft < 12) {
+        newLeft = 12;
+      }
+      
+      if (newTop + rect.height > window.innerHeight - 12) {
+        newTop = window.innerHeight - rect.height - 12;
+      }
+      if (newTop < 12) {
+        newTop = 12;
+      }
+      
+      setSafePosition({ left: newLeft, top: newTop });
+    } else if (popupRef.current) {
+      const rect = popupRef.current.getBoundingClientRect();
       const container = document.querySelector('.zyoutube-panel-content') || document.body;
       const containerRect = container.getBoundingClientRect();
       
@@ -117,15 +142,13 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
         newLeft = Math.max(10, containerRect.width - rect.width - 10);
       }
       
-      // Calculate top relative to container (subtracting scroll offset isn't strictly necessary if it's already accounted for, but we ensure it fits)
-      // Usually position is passed relative to scroll area. Let's just clamp the right side and bottom side.
       if (newTop + rect.height > container.scrollHeight) {
         newTop = Math.max(10, container.scrollHeight - rect.height - 10);
       }
       
       setSafePosition({ left: newLeft, top: newTop });
     }
-  }, [position, data]);
+  }, [position, data, positionMode]);
 
   const toggleSave = async () => {
     if (!data) return;
@@ -134,6 +157,9 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
       if (isSaved) {
         await DictionaryDB.removeStudyWord(studyWordId);
         setIsSaved(false);
+        setSaveMessage('Kelime listeden çıkarıldı.');
+        if (onSavedChange) onSavedChange(false, null);
+        setTimeout(() => setSaveMessage(null), 3000);
       } else {
         const studyWord: StudyWord = {
           id: studyWordId,
@@ -158,6 +184,7 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
         await DictionaryDB.addStudyWord(studyWord);
         setIsSaved(true);
         setSaveMessage('Kelime çalışılacak kelimelere eklendi.');
+        if (onSavedChange) onSavedChange(true, studyWord);
         setTimeout(() => setSaveMessage(null), 3000);
       }
     } catch (e: any) {
@@ -174,11 +201,11 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
   return (
     <div
       ref={popupRef}
-      className="absolute bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-4 z-50 text-left flex flex-col zy-word-popup"
+      className={`${positionMode === 'viewport' ? 'fixed' : 'absolute'} bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 p-4 z-50 text-left flex flex-col zy-word-popup`}
       style={{ 
         top: `${safePosition.top}px`, 
         left: `${safePosition.left}px`,
-        width: '320px',
+        width: positionMode === 'viewport' ? 'min(360px, calc(100vw - 24px))' : '320px',
         maxHeight: '400px',
         overflowY: 'auto'
       }}
@@ -207,22 +234,34 @@ export const WordDictionaryPopup: React.FC<WordDictionaryPopupProps> = ({
             </div>
           )}
         </div>
-        <button 
-          onClick={toggleSave}
-          disabled={!data}
-          className="text-yellow-500 hover:text-yellow-600 p-1 disabled:opacity-50"
-          title={isSaved ? "Çalışılacak kelimelerden çıkar" : "Çalışılacak kelimelere ekle"}
-        >
-          {isSaved ? (
-            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-            </svg>
-          ) : (
+        <div className="flex items-center gap-1">
+          <button 
+            onClick={toggleSave}
+            disabled={!data}
+            className="text-yellow-500 hover:text-yellow-600 p-1 disabled:opacity-50"
+            title={isSaved ? "Çalışılacak kelimelerden çıkar" : "Çalışılacak kelimelere ekle"}
+          >
+            {isSaved ? (
+              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+              </svg>
+            ) : (
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+              </svg>
+            )}
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onClose(); }}
+            className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-1 flex items-center justify-center min-w-[32px] min-h-[32px]"
+            title="Kapat"
+            aria-label="Sözlük penceresini kapat"
+          >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
-          )}
-        </button>
+          </button>
+        </div>
       </div>
 
       {saveMessage && (

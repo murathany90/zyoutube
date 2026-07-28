@@ -1,0 +1,224 @@
+.zy-history-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background-color: #f9fafb;
+  color: #1f2937;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.zy-history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  background-color: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.zy-history-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.zy-history-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.zy-history-tabs {
+  display: flex;
+  border-bottom: 1px solid #e5e7eb;
+  background-color: #ffffff;
+  padding: 0 24px;
+}
+
+.zy-history-tab {
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 14px;
+  font-weight: 600;
+  color: #6b7280;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.zy-history-tab:hover {
+  color: #374151;
+}
+
+.zy-history-tab.active {
+  color: #ef4444;
+  border-bottom-color: #ef4444;
+}
+
+.zy-history-scroll-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.zy-summary-card {
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.zy-summary-section-title {
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin-top: 0;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #f3f4f6;
+  padding-bottom: 8px;
+}
+
+.zy-summary-text {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #374151;
+  margin-bottom: 16px;
+}
+
+.zy-sentence-row {
+  display: flex;
+  gap: 16px;
+  padding: 12px;
+  border-bottom: 1px solid #f3f4f6;
+  align-items: flex-start;
+}
+
+.zy-sentence-row:hover {
+  background-color: #f9fafb;
+}
+
+.zy-sentence-time {
+  font-size: 12px;
+  color: #ef4444;
+  cursor: pointer;
+  min-width: 48px;
+  font-weight: 600;
+}
+
+.zy-sentence-time:hover {
+  text-decoration: underline;
+}
+
+.zy-sentence-tr {
+  flex: 1;
+  font-size: 14px;
+  color: #1f2937;
+}
+
+.zy-sentence-en {
+  flex: 1;
+  font-size: 14px;
+  color: #6b7280;
+  font-style: italic;
+}
+
+.zy-word-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.zy-word-card {
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  position: relative;
+}
+
+.zy-word-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.zy-word-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+
+.zy-word-pos {
+  font-size: 11px;
+  color: #6b7280;
+  background-color: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 8px;
+}
+
+.zy-word-meanings {
+  font-size: 13px;
+  color: #374151;
+  margin: 0 0 12px 0;
+  padding-left: 16px;
+}
+
+.zy-word-context {
+  background-color: #f9fafb;
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #4b5563;
+}
+
+.zy-clickable-word {
+  cursor: pointer;
+  border-bottom: 1px dashed transparent;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.zy-clickable-word:hover {
+  background-color: #fef3c7;
+  border-bottom-color: #d97706;
+}
+
+.zy-btn {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid #d1d5db;
+  background-color: #ffffff;
+  color: #374151;
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zy-btn:hover {
+  background-color: #f3f4f6;
+}
+
+.zy-btn-danger {
+  color: #ef4444;
+  border-color: #fca5a5;
+  background-color: #fef2f2;
+}
+
+.zy-btn-danger:hover {
+  background-color: #fee2e2;
+}

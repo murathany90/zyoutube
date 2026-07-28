@@ -254,6 +254,12 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
           createdAt: Date.now(),
           updatedAt: Date.now()
         }).then(() => {
+          chrome.runtime.sendMessage({
+            type: 'LIBRARY_ENTRY_UPDATED',
+            videoId,
+            reason: 'correction'
+          }).catch(console.warn);
+
           setIsCorrecting(false);
           setPendingCorrection(false);
           setCorrectionProgress(null);

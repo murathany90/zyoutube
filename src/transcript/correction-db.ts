@@ -116,4 +116,20 @@ export class CorrectionDB {
       console.warn('CorrectionDB remove error', e);
     }
   }
+
+  static async clear(): Promise<void> {
+    try {
+      const db = await this.getDB();
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(this.STORE_NAME, 'readwrite');
+        const store = transaction.objectStore(this.STORE_NAME);
+        const request = store.clear();
+
+        request.onsuccess = () => resolve();
+        request.onerror = () => reject(request.error);
+      });
+    } catch (e) {
+      console.warn('CorrectionDB clear error', e);
+    }
+  }
 }

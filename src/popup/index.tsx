@@ -7,7 +7,8 @@ import { GemSettingsService } from '../gem/settings';
 import { GemSettings, DEFAULT_GEM_SETTINGS, PanelSettings, DEFAULT_PANEL_SETTINGS, SummaryEngine } from '../gem/types';
 import { ConfigValidator } from '../settings/validation';
 import { LocalAIChecker, LocalAIStatus } from '../settings/local-ai';
-import { HistoryService, SavedSummary } from '../settings/history';
+import { LibraryService, VideoLibraryEntry } from '../history/library-service';
+
 import { PromptBuilder } from '../ai/prompt-builder';
 import { SummaryRequest } from '../ai/types';
 import { CorrectionPromptBuilder } from '../ai/prompt-correction';
@@ -42,7 +43,10 @@ const Popup = () => {
   const [localStatus, setLocalStatus] = useState<LocalAIStatus | null>(null);
   const [saveStatus, setSaveStatus] = useState<string>('');
   const [gemUrlError, setGemUrlError] = useState<string>('');
-  const [summaries, setSummaries] = useState<SavedSummary[]>([]);
+  const [libraryEntries, setLibraryEntries] = useState<VideoLibraryEntry[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [sortOrder, setSortOrder] = useState('latest');
   const [draftProvider, setDraftProvider] = useState<AIProviderConfig | null>(null);
 
   useEffect(() => {
@@ -53,7 +57,7 @@ const Popup = () => {
     GemSettingsService.getGemSettings().then(g => setGemSettings(g));
     GemSettingsService.getPanelSettings().then(p => setPanelSettings(p));
     LocalAIChecker.checkStatus().then(st => setLocalStatus(st));
-    HistoryService.getSummaries().then(s => setSummaries(s));
+    LibraryService.getEntries().then(e => setLibraryEntries(e));
     // Migration
     GemSettingsService.migrateFromGeminiApi();
   }, []);
@@ -606,77 +610,157 @@ const Popup = () => {
         )}
 
         {/* History / Özet Listesi Tab */}
-        {activeTab === 'history' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>Özet Geçmişi</h2>
-              <button 
-                onClick={() => {
-                  if(confirm('Tüm geçmişi silmek istediğinize emin misiniz?')) {
-                    HistoryService.clearHistory().then(() => setSummaries([]));
-                  }
-                }}
-                style={{ fontSize: '11px', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-              >
-                Tümünü Sil
-              </button>
-            </div>
-            
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
-              {summaries.length === 0 ? (
-                <div style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center', marginTop: '20px' }}>Geçmiş bulunamadı.</div>
-              ) : (
-                summaries.map(s => (
-                  <div key={s.id} style={{ padding: '10px', background: 'var(--zy-item-bg, #f3f4f6)', borderRadius: '6px', cursor: 'pointer', transition: 'background 0.2s', border: '1px solid var(--zy-border, #e5e7eb)' }}
-                    onClick={() => chrome.tabs.create({ url: chrome.runtime.getURL(`history.html?id=${s.id}`) })}
-                    onMouseOver={(e) => e.currentTarget.style.background = 'var(--zy-item-hover, #e5e7eb)'}
-                    onMouseOut={(e) => e.currentTarget.style.background = 'var(--zy-item-bg, #f3f4f6)'}
-                  >
-                    <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '4px', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {s.title}
-                    </div>
-                    <div style={{ fontSize: '11px', color: 'var(--zy-text-muted, #6b7280)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', gap: '8px' }}>
-                        <span>{new Date(s.date).toLocaleDateString('tr-TR')}</span>
-                        <span>•</span>
-                        <span>{s.summary.providerId}</span>
-                      </div>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation(); // prevent opening the page
-                          if(confirm('Bu özeti silmek istediğinize emin misiniz?')) {
-                            HistoryService.deleteSummary(s.id).then(() => {
-                              setSummaries(prev => prev.filter(item => item.id !== s.id));
-                            });
-                          }
-                        }}
-                        style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px 4px', borderRadius: '4px' }}
-                        title="Sil"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+        {activeTab === 'history' && (() => {
+          let filtered = libraryEntries;
 
-      {/* Fixed footer */}
-      <div style={{
-        padding: '8px 16px', borderTop: '1px solid #e5e7eb',
-        backgroundColor: 'var(--zy-card-bg, #fff)', flexShrink: 0,
-        fontSize: '11px', color: '#9ca3af', textAlign: 'center',
-      }}>
-        ZYouTube v1.0.0
+          // Search
+          if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase().trim();
+            filtered = filtered.filter(e => {
+              if (e.title.toLowerCase().includes(q)) return true;
+              if (e.savedSummary?.summary?.summary?.tr?.toLowerCase().includes(q)) return true;
+              if (e.savedSummary?.summary?.summary?.en?.toLowerCase().includes(q)) return true;
+              if (e.savedSummary?.summary?.keyIdeas?.some(k => k.title?.tr?.toLowerCase().includes(q) || k.title?.en?.toLowerCase().includes(q) || k.description?.tr?.toLowerCase().includes(q) || k.description?.en?.toLowerCase().includes(q))) return true;
+              if (e.correctedTranscript?.sentences?.some(s => s.correctedTurkish?.toLowerCase().includes(q) || s.correctedEnglish?.toLowerCase().includes(q))) return true;
+              if (e.studyWords?.some(w => 
+                w.displayWord.toLowerCase().includes(q) || 
+                w.meaningsTr.some(m => m.toLowerCase().includes(q)) || 
+                w.englishSentence.toLowerCase().includes(q) || 
+                w.turkishSentence.toLowerCase().includes(q)
+              )) return true;
+              return false;
+            });
+          }
+
+          // Filter
+          if (typeFilter === 'summary') filtered = filtered.filter(e => e.hasSummary);
+          else if (typeFilter === 'correction') filtered = filtered.filter(e => e.hasCorrectedTranscript);
+          else if (typeFilter === 'words') filtered = filtered.filter(e => e.hasStudyWords);
+          else if (typeFilter === 'transcript') filtered = filtered.filter(e => e.hasOriginalTranscript && !e.hasSummary && !e.hasCorrectedTranscript);
+
+          // Sort
+          filtered.sort((a, b) => {
+            const dateA = a.updatedAt;
+            const dateB = b.updatedAt;
+            if (sortOrder === 'latest') return dateB - dateA;
+            if (sortOrder === 'oldest') return dateA - dateB;
+            if (sortOrder === 'az') return a.title.localeCompare(b.title);
+            if (sortOrder === 'za') return b.title.localeCompare(a.title);
+            return 0;
+          });
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', height: '100%' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h2 style={{ fontSize: '16px', fontWeight: 600, margin: 0 }}>Özet ve Transkript Geçmişi</h2>
+                <button 
+                  onClick={() => {
+                    if(confirm('Tüm geçmişi silmek istediğinize emin misiniz?')) {
+                      LibraryService.clearAll().then(() => setLibraryEntries([]));
+                    }
+                  }}
+                  style={{ fontSize: '11px', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                >
+                  Tümünü Sil
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <input 
+                  type="text" 
+                  placeholder="Başlık, transkript, özet veya kelime ara..." 
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  style={{...inputStyle, padding: '8px', fontSize: '12px'}}
+                />
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <select style={{...selectStyle, flex: 1, padding: '4px', fontSize: '12px'}} value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
+                    <option value="all">Tümü</option>
+                    <option value="summary">Özeti Olanlar</option>
+                    <option value="correction">Düzeltilmiş Transkript</option>
+                    <option value="words">Çalışılacak Kelime</option>
+                    <option value="transcript">Yalnızca Transkript</option>
+                  </select>
+                  <select style={{...selectStyle, flex: 1, padding: '4px', fontSize: '12px'}} value={sortOrder} onChange={e => setSortOrder(e.target.value)}>
+                    <option value="latest">Son Güncellenen</option>
+                    <option value="oldest">En Eski</option>
+                    <option value="az">Başlık A-Z</option>
+                    <option value="za">Başlık Z-A</option>
+                  </select>
+                </div>
+                <div style={{ fontSize: '11px', color: 'var(--zy-text-muted, #6b7280)', textAlign: 'right' }}>
+                  {filtered.length} kayıt bulundu
+                </div>
+              </div>
+              
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '8px', paddingRight: '4px' }}>
+                {filtered.length === 0 ? (
+                  <div style={{ color: '#9ca3af', fontSize: '13px', textAlign: 'center', marginTop: '20px' }}>
+                    {libraryEntries.length === 0 ? "Kayıt bulunamadı." : "Aramanızla eşleşen kayıt bulunamadı."}
+                  </div>
+                ) : (
+                  filtered.map(s => (
+                    <div key={s.videoId} style={{ display: 'flex', gap: '10px', padding: '10px', background: 'var(--zy-item-bg, #f3f4f6)', borderRadius: '6px', cursor: 'pointer', transition: 'background 0.2s', border: '1px solid var(--zy-border, #e5e7eb)' }}
+                      onClick={(e) => {
+                         if ((e.target as HTMLElement).tagName !== 'BUTTON' && (e.target as HTMLElement).tagName !== 'svg' && (e.target as HTMLElement).tagName !== 'path') {
+                           chrome.tabs.create({ url: chrome.runtime.getURL(`history.html?videoId=${s.videoId}`) });
+                         }
+                      }}
+                      onMouseOver={(e) => e.currentTarget.style.background = 'var(--zy-item-hover, #e5e7eb)'}
+                      onMouseOut={(e) => e.currentTarget.style.background = 'var(--zy-item-bg, #f3f4f6)'}
+                    >
+                      <img src={`https://i.ytimg.com/vi/${s.videoId}/mqdefault.jpg`} 
+                           style={{ width: '80px', height: '45px', objectFit: 'cover', borderRadius: '4px', backgroundColor: '#e5e7eb' }} 
+                           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div style={{ fontWeight: 600, fontSize: '13px', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                          {s.title}
+                        </div>
+                        
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                          {s.hasSummary && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#dbeafe', color: '#1e40af', borderRadius: '4px' }}>Özet</span>}
+                          {s.hasCorrectedTranscript && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#dcfce3', color: '#166534', borderRadius: '4px' }}>Düzeltilmiş ({s.correctedTranscript?.sentences?.length || 0})</span>}
+                          {s.hasOriginalTranscript && !s.hasCorrectedTranscript && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#f3f4f6', color: '#374151', borderRadius: '4px' }}>Transkript</span>}
+                          {s.studyWordCount > 0 && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#fef3c7', color: '#92400e', borderRadius: '4px' }}>{s.studyWordCount} Kelime</span>}
+                        </div>
+
+                        {!s.hasSummary && s.hasCorrectedTranscript && (
+                          <div style={{ fontSize: '10px', color: '#ef4444', fontStyle: 'italic' }}>Özet oluşturulmamış</div>
+                        )}
+                        
+                        <div style={{ fontSize: '11px', color: 'var(--zy-text-muted, #6b7280)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
+                          <span>{new Date(s.updatedAt).toLocaleString('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute:'2-digit' })}</span>
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (confirm('Bu kaydı silmek istediğinize emin misiniz?')) {
+                                LibraryService.deleteVideoEntry(s.videoId).then(() => {
+                                  setLibraryEntries(prev => prev.filter(x => x.videoId !== s.videoId));
+                                }).catch(console.error);
+                              }
+                            }}
+                            style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px' }}
+                            title="Sil"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
 };
 
-const container = document.getElementById('root');
+const container = document.getElementById('app-root');
 if (container) {
   const root = createRoot(container);
   root.render(<Popup />);

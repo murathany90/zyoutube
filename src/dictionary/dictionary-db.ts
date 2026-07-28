@@ -179,4 +179,44 @@ export class DictionaryDB {
       request.onerror = () => reject(request.error);
     });
   }
+
+  static async removeStudyWordsByVideo(videoId: string): Promise<void> {
+    const words = await this.getStudyWordsByVideo(videoId);
+    await this.init();
+    
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction('studyWords', 'readwrite');
+      const store = tx.objectStore('studyWords');
+      
+      let pending = words.length;
+      if (pending === 0) {
+        resolve();
+        return;
+      }
+      
+      let hasError = false;
+      words.forEach(w => {
+        const req = store.delete(w.id);
+        req.onsuccess = () => {
+          pending--;
+          if (pending === 0 && !hasError) resolve();
+        };
+        req.onerror = () => {
+          hasError = true;
+          reject(req.error);
+        };
+      });
+    });
+  }
+
+  static async clearStudyWords(): Promise<void> {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const tx = this.db!.transaction('studyWords', 'readwrite');
+      const store = tx.objectStore('studyWords');
+      const request = store.clear();
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
+  }
 }
