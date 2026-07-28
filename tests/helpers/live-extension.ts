@@ -203,7 +203,7 @@ export async function openApprovedCaptionedVideo(
           return entry?.transcript?.length || 0;
         }, videoId);
       }, {
-        timeout: 90000,
+        timeout: 45000,
         intervals: [1000, 2000, 5000]
       }).toBeGreaterThan(0);
 
