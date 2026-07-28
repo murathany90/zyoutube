@@ -5,6 +5,7 @@ import { CORRECTION_SAVE_FAILED_MESSAGE } from './correction-ui-messages';
 import { CorrectedBilingualSentence } from '../settings/types';
 import { sendRuntimeMessage } from './runtime-messenger';
 import { WordDictionaryPopup } from './components/WordDictionaryPopup';
+import { persistDisplayedTranscript } from './transcript-history';
 
 const ENABLE_DICTIONARY_POPUP = true;
 
@@ -86,7 +87,19 @@ const HighlightedText = ({
   }
 };
 
-export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string, onTranscriptLoaded?: (result: TranscriptResult | null) => void }) => {
+interface TranscriptTabProps {
+  videoId: string;
+  title: string;
+  url: string;
+  onTranscriptLoaded?: (result: TranscriptResult | null) => void;
+}
+
+export const TranscriptTab = ({
+  videoId,
+  title,
+  url,
+  onTranscriptLoaded
+}: TranscriptTabProps) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -452,6 +465,15 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
             setResult(res);
             console.log(`[Transcript] result committed`);
             if (onTranscriptLoaded) onTranscriptLoaded(res);
+            persistDisplayedTranscript({
+              videoId,
+              title,
+              url,
+              result: res,
+              displayedLanguage: displayLanguage
+            }).catch(error => {
+              console.error('[Transcript] history persistence failed', error);
+            });
         }
       } catch (err: any) {
         if (err.name === 'AbortError') return;
@@ -472,7 +494,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       active = false;
       if (abortControllerRef.current) abortControllerRef.current.abort();
     };
-  }, [selectedTrackUrl, videoId, tracks, displayLanguage, reloadCounter]);
+  }, [selectedTrackUrl, videoId, title, url, tracks, displayLanguage, reloadCounter]);
 
   // 3. Track video time
   useEffect(() => {

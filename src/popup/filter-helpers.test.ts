@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterLibraryEntries } from './filter-helpers';
+import { filterLibraryEntries, getLibraryCardState } from './filter-helpers';
 import { VideoLibraryEntry } from '../history/library-service';
 
 describe('filterLibraryEntries', () => {
@@ -105,5 +105,26 @@ describe('filterLibraryEntries', () => {
   it('should sort by date', () => {
     expect(filterLibraryEntries(dummyEntries, '', 'all', 'latest').map(e => e.videoId)).toEqual(['v3', 'v2', 'v1']);
     expect(filterLibraryEntries(dummyEntries, '', 'all', 'oldest').map(e => e.videoId)).toEqual(['v1', 'v2', 'v3']);
+  });
+
+  it('transcript-only card shows transcript and no-summary states together', () => {
+    const transcriptOnly = {
+      ...dummyEntries[0],
+      hasSummary: false,
+      hasOriginalTranscript: true,
+      hasCorrectedTranscript: false,
+      savedSummary: {
+        ...dummyEntries[0].savedSummary,
+        summary: undefined,
+        transcript: [{ text: 'Transcript' }]
+      }
+    } as VideoLibraryEntry;
+
+    expect(getLibraryCardState(transcriptOnly)).toEqual({
+      showSummaryBadge: false,
+      showTranscriptBadge: true,
+      showCorrectionBadge: false,
+      showNoSummary: true
+    });
   });
 });

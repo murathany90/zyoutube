@@ -68,6 +68,29 @@ describe('LibraryService', () => {
     expect(entries).toEqual([]);
   });
 
+  it('transcript-only history record appears without summary or correction', async () => {
+    vi.mocked(HistoryService.getSummaries).mockResolvedValue([{
+      id: 'transcript-v1',
+      videoId: 'v1',
+      title: 'Transcript Video',
+      url: 'https://www.youtube.com/watch?v=v1',
+      date: 100,
+      transcript: [{ id: 's1', text: 'Merhaba', cleanText: 'Merhaba' }]
+    } as any]);
+    vi.mocked(CorrectionDB.getAll).mockResolvedValue([]);
+    vi.mocked(DictionaryDB.getAllStudyWords).mockResolvedValue([]);
+
+    const entries = await LibraryService.getEntries();
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      videoId: 'v1',
+      hasSummary: false,
+      hasOriginalTranscript: true,
+      hasCorrectedTranscript: false
+    });
+  });
+
   it('should clear all databases using Promise.allSettled', async () => {
     vi.mocked(HistoryService.clearHistory).mockResolvedValue(undefined);
     vi.mocked(CorrectionDB.clear).mockRejectedValue(new Error('DB Fail'));

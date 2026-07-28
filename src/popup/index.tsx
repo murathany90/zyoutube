@@ -1,4 +1,4 @@
-import { filterLibraryEntries } from './filter-helpers';
+import { filterLibraryEntries, getLibraryCardState } from './filter-helpers';
 import { createRoot } from 'react-dom/client';
 import { useState, useEffect } from 'react';
 import '../styles/popup.css';
@@ -703,7 +703,9 @@ const Popup = () => {
                     {libraryEntries.length === 0 ? "Kayıt bulunamadı." : "Aramanızla eşleşen kayıt bulunamadı."}
                   </div>
                 ) : !libraryError && (
-                  filtered.map(s => (
+                  filtered.map(s => {
+                    const cardState = getLibraryCardState(s);
+                    return (
                     <div key={s.videoId} style={{ display: 'flex', gap: '10px', padding: '10px', background: 'var(--zy-item-bg, #f3f4f6)', borderRadius: '6px', cursor: 'pointer', transition: 'background 0.2s', border: '1px solid var(--zy-border, #e5e7eb)' }}
                       onClick={(e) => {
                          if ((e.target as HTMLElement).tagName !== 'BUTTON' && (e.target as HTMLElement).tagName !== 'svg' && (e.target as HTMLElement).tagName !== 'path') {
@@ -722,13 +724,13 @@ const Popup = () => {
                         </div>
                         
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                          {s.hasSummary && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#dbeafe', color: '#1e40af', borderRadius: '4px' }}>Özet</span>}
-                          {s.hasCorrectedTranscript && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#dcfce3', color: '#166534', borderRadius: '4px' }}>Düzeltilmiş ({s.correctedTranscript?.sentences?.length || 0})</span>}
-                          {s.hasOriginalTranscript && !s.hasCorrectedTranscript && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#f3f4f6', color: '#374151', borderRadius: '4px' }}>Transkript</span>}
+                          {cardState.showSummaryBadge && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#dbeafe', color: '#1e40af', borderRadius: '4px' }}>Özet</span>}
+                          {cardState.showCorrectionBadge && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#dcfce3', color: '#166534', borderRadius: '4px' }}>Düzeltilmiş ({s.correctedTranscript?.sentences?.length || 0})</span>}
+                          {cardState.showTranscriptBadge && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#f3f4f6', color: '#374151', borderRadius: '4px' }}>Transkript</span>}
                           {s.studyWordCount > 0 && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#fef3c7', color: '#92400e', borderRadius: '4px' }}>{s.studyWordCount} Kelime</span>}
                         </div>
 
-                        {!s.hasSummary && s.hasCorrectedTranscript && (
+                        {cardState.showNoSummary && (
                           <div style={{ fontSize: '10px', color: '#ef4444', fontStyle: 'italic' }}>Özet oluşturulmamış</div>
                         )}
                         
@@ -753,7 +755,8 @@ const Popup = () => {
                         </div>
                       </div>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
