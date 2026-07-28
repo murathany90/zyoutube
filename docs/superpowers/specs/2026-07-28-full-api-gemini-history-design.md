@@ -144,4 +144,3 @@ install a fake `movie_player`, intercept routes, or synthesize timedtext.
 Streaming-on and streaming-off API runs cover correction and summary. Gemini
 validation uses the existing signed-in Gemini Web/Gem session and verifies one
 tab, UI delivery, and History persistence.
-

@@ -194,4 +194,3 @@
 - [ ] Stage only files listed by this plan, commit to
   `codex/full-api-gemini-history-fix`, and push that branch.
 - [ ] Do not merge into `main`.
-
