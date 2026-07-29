@@ -238,10 +238,8 @@ const Popup = () => {
         borderBottom: '1px solid #e5e7eb', flexShrink: 0,
       }}>
         <h1 style={{ fontSize: '15px', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="#ef4444">
-            <path d="M21.583 6.846c-.204-1.396-1.145-2.52-2.368-2.736C17.119 3.75 12 3.75 12 3.75s-5.12 0-7.215.36c-1.223.216-2.164 1.34-2.368 2.736C2 8.71 2 12 2 12s0 3.29.417 5.154c.204 1.396 1.145 2.52 2.368 2.736 2.095.36 7.215.36 7.215.36s5.12 0 7.215-.36c1.223-.216 2.164-1.34 2.368-2.736.417-1.864.417-5.154.417-5.154s0-3.29-.417-5.154zM9.996 15.596V8.404L15.811 12l-5.815 3.596z" />
-          </svg>
-          ZYouTube Ayarları
+          <img src="/icons/zyoutube-ai-32.png" width="18" height="18" alt="" />
+          ZYouTube AI Ayarları
         </h1>
         {saveStatus && <span style={{ fontSize: '12px', color: '#22c55e', fontWeight: 600 }}>{saveStatus}</span>}
       </header>

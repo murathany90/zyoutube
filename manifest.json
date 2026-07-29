@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "ZYouTube — AI Özet",
+  "name": "ZYouTube AI",
   "version": "1.1.0",
-  "description": "YouTube videoları için Gemini Gem ve AI destekli özetleme eklentisi.",
+  "description": "YouTube videoları için AI destekli transkript, düzeltme, özet ve geçmiş eklentisi.",
+  "icons": {
+    "16": "icons/zyoutube-ai-16.png",
+    "32": "icons/zyoutube-ai-32.png",
+    "48": "icons/zyoutube-ai-48.png",
+    "128": "icons/zyoutube-ai-128.png"
+  },
   "permissions": [
     "storage",
     "tabs",
@@ -22,6 +28,13 @@
     "https://*/*"
   ],
   "action": {
+    "default_title": "ZYouTube AI",
+    "default_icon": {
+      "16": "icons/zyoutube-ai-16.png",
+      "32": "icons/zyoutube-ai-32.png",
+      "48": "icons/zyoutube-ai-48.png",
+      "128": "icons/zyoutube-ai-128.png"
+    },
     "default_popup": "index.html"
   },
   "background": {
