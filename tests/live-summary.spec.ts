@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadPrivateLiveCorrectionEnvironment } from './helpers/load-private-env';
 import {
+  assertNoExtensionConsoleErrors,
   assertNoApiKeyLeak,
   launchLiveExtension,
   openApprovedCaptionedVideo
@@ -16,11 +17,11 @@ const environment = loadPrivateLiveCorrectionEnvironment(projectRoot);
 
 test('real YouTube captions persist transcript-only state and API summary through History', async ({}, testInfo) => {
   test.setTimeout(360000);
-  expect(environment.summaryStreaming).toBe(false);
+  expect(environment.summaryStreaming).toBe(true);
   const session = await launchLiveExtension(testInfo, environment);
 
   try {
-    const video = await openApprovedCaptionedVideo(session, 1);
+    const video = await openApprovedCaptionedVideo(session, 3);
 
     const transcriptOnlyEntry = await session.background.evaluate(
       async expectedVideoId => {
@@ -58,7 +59,10 @@ test('real YouTube captions persist transcript-only state and API summary throug
       'Transkript içinde ara...'
     )).toBeVisible();
 
-    await video.page.getByRole('button', { name: 'Özet' }).click();
+    await video.page.getByRole('button', {
+      name: 'Özet',
+      exact: true
+    }).click();
     const engineSelect = video.page.locator('select').filter({
       has: video.page.locator('option[value="openai-compatible"]')
     });
@@ -113,12 +117,13 @@ test('real YouTube captions persist transcript-only state and API summary throug
     )).not.toBeVisible();
 
     assertNoApiKeyLeak(session);
+    assertNoExtensionConsoleErrors(session);
     console.log(JSON.stringify({
       approvedVideoId: video.videoId,
       realTranscriptSegments: video.transcriptLength,
       transcriptOnlyPopupVisible: true,
       transcriptOnlyDetailVisible: true,
-      streaming: false,
+      streaming: true,
       apiSummaryParsed: true,
       summaryCardVisible: true,
       historyStored: true,

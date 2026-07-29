@@ -640,4 +640,81 @@ describe('api-worker SSE and HTTP logic', () => {
       )
     ).toBe(false);
   });
+
+  it('14. uzun duzeltmeyi parcalara ayirip tek sonuc olarak birlestirir', async () => {
+    const chunkContents = [
+      JSON.stringify({
+        sentences: [{
+          from: 0,
+          to: 39,
+          tr: 'Birinci parca.',
+          en: 'First chunk.'
+        }]
+      }),
+      JSON.stringify({
+        sentences: [{
+          from: 0,
+          to: 0,
+          tr: 'Ikinci parca.',
+          en: 'Second chunk.'
+        }]
+      })
+    ];
+
+    fetchMock.mockImplementation(() => {
+      const content = chunkContents.shift();
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'text/event-stream' }),
+        body: createMockStream([
+          `data: {"choices":[{"delta":{"content":${JSON.stringify(content)}},"finish_reason":"stop"}]}\n\n`
+        ])
+      });
+    });
+
+    messageListener(
+      {
+        type: 'API_CORRECTION_START',
+        taskId: 'task-chunked',
+        videoId: 'video-1',
+        request: {
+          transcript: {
+            sourceLanguage: 'tr',
+            segments: Array.from({ length: 41 }, (_, index) => ({
+              id: `segment-${index}`,
+              startTimeMs: index * 1000,
+              endTimeMs: (index + 1) * 1000,
+              turkish: `metin ${index}`,
+              english: ''
+            }))
+          },
+          options: {},
+          video: { title: 'Test Video' }
+        },
+        config: {
+          baseUrl: 'http://test',
+          apiKey: 'key',
+          model: 'test-model',
+          correctionStreaming: true
+        }
+      },
+      {},
+      vi.fn()
+    );
+    await vi.runAllTimersAsync();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const completedCall = chromeMock.runtime.sendMessage.mock.calls.find(
+      (call: any) => call[0].type === 'API_CORRECTION_COMPLETED'
+    );
+    expect(completedCall).toBeDefined();
+    expect(
+      completedCall![0].result.sentences.flatMap(
+        (sentence: any) => sentence.sourceSegmentIds
+      )
+    ).toEqual(
+      Array.from({ length: 41 }, (_, index) => `segment-${index}`)
+    );
+  });
 });

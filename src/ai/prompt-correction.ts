@@ -40,6 +40,7 @@ JSON ÇIKTI ŞABLONU:
 Kaynak Dil: ${request.transcript.sourceLanguage}
 
 Lütfen aşağıdaki altyazı segmentlerini analiz et, anlam bütünlüğüne göre cümleler halinde grupla ve istenen JSON formatında döndür.
+Bu istekte tam ${request.transcript.segments.length} segment vardır. Geçerli indeks aralığı 0-${Math.max(0, request.transcript.segments.length - 1)} ve son cümlenin to değeri tam olarak ${Math.max(0, request.transcript.segments.length - 1)} olmalıdır.
 
 Segmentler:
 ${JSON.stringify({ sourceLanguage: request.transcript.sourceLanguage, segments: request.transcript.segments.map((s, i) => [i, s.startTimeMs, s.endTimeMs, s.turkish, s.english]) })}`;
@@ -60,10 +61,15 @@ ${JSON.stringify({ sourceLanguage: request.transcript.sourceLanguage, segments: 
     };
 
     const tokenParam = config.correctionTokenParam === 'max_completion_tokens' ? 'max_completion_tokens' : 'max_tokens';
-    body[tokenParam] = config.correctionMaxTokens ?? 130000;
+    const configuredMaxTokens = Number(config.correctionMaxTokens);
+    body[tokenParam] = Number.isFinite(configuredMaxTokens)
+      ? Math.min(65_536, Math.max(1_000, Math.floor(configuredMaxTokens)))
+      : 16_384;
     
     if (config.correctionEnableReasoning === true) {
       body.chat_template_kwargs = { thinking: true, reasoning_effort: "high" };
+    } else {
+      body.chat_template_kwargs = { thinking: false };
     }
 
     if (config.correctionStreaming !== false) {
@@ -73,8 +79,7 @@ ${JSON.stringify({ sourceLanguage: request.transcript.sourceLanguage, segments: 
       }
     }
     
-    // correctionJsonMode varsayılan olarak true kabul edilir
-    if (config.correctionJsonMode !== false) {
+    if (config.correctionJsonMode === true) {
       body.response_format = { type: 'json_object' };
     }
 

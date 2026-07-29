@@ -12,6 +12,8 @@ export interface CorrectionReadMetrics {
   lastSseEventAtMs: number | null;
   sseEventCount: number;
   contentChunkCount: number;
+  contentCharacters: number;
+  reasoningCharacters: number;
 }
 
 export interface CorrectionResponseResult {
@@ -100,7 +102,9 @@ function timeoutDiagnostics(
     receivedCharacters: metrics.receivedCharacters,
     lastSseEventAtMs: metrics.lastSseEventAtMs,
     sseEventCount: metrics.sseEventCount,
-    contentChunkCount: metrics.contentChunkCount
+    contentChunkCount: metrics.contentChunkCount,
+    contentCharacters: metrics.contentCharacters,
+    reasoningCharacters: metrics.reasoningCharacters
   };
 }
 
@@ -145,7 +149,9 @@ export async function readCorrectionResponse(
     receivedCharacters: 0,
     lastSseEventAtMs: null,
     sseEventCount: 0,
-    contentChunkCount: 0
+    contentChunkCount: 0,
+    contentCharacters: 0,
+    reasoningCharacters: 0
   };
 
   if (!response.body) {
@@ -158,6 +164,8 @@ export async function readCorrectionResponse(
       const parsed = await responseWithLegacyMethods.json();
       const rawText = JSON.stringify(parsed);
       const envelope = parseOpenAiEnvelope(parsed, rawText);
+      metrics.contentCharacters = envelope.content.length;
+      metrics.reasoningCharacters = envelope.reasoningContent.length;
       return {
         ...envelope,
         streamDoneReceived: false,
@@ -168,6 +176,7 @@ export async function readCorrectionResponse(
 
     if (typeof responseWithLegacyMethods.text === 'function') {
       const rawText = await responseWithLegacyMethods.text();
+      metrics.contentCharacters = rawText.length;
       return {
         content: rawText,
         reasoningContent: '',
@@ -197,6 +206,8 @@ export async function readCorrectionResponse(
   let buffer = '';
   let rawText = '';
   let firstByteSeen = false;
+  let contentEventMode: 'none' | 'delta' | 'message' = 'none';
+  let reasoningEventMode: 'none' | 'delta' | 'message' = 'none';
   let sseDetected = responseContentType
     .toLowerCase()
     .includes('text/event-stream');
@@ -217,19 +228,37 @@ export async function readCorrectionResponse(
       metrics.lastSseEventAtMs = Math.round(now() - startedAt);
 
       const choice = data?.choices?.[0];
-      const contentPart = normalizeContentPart(
-        choice?.delta?.content ?? choice?.message?.content
+      const deltaContent = normalizeContentPart(choice?.delta?.content);
+      const messageContent = normalizeContentPart(choice?.message?.content);
+      const deltaReasoning = normalizeContentPart(
+        choice?.delta?.reasoning_content
       );
-      const reasoningPart = normalizeContentPart(
-        choice?.delta?.reasoning_content ??
+      const messageReasoning = normalizeContentPart(
         choice?.message?.reasoning_content
       );
 
-      if (contentPart) {
-        content += contentPart;
+      if (deltaContent) {
+        content += deltaContent;
+        contentEventMode = 'delta';
+        metrics.contentChunkCount += 1;
+      } else if (messageContent) {
+        content = contentEventMode === 'delta'
+          ? content + messageContent
+          : messageContent;
+        if (contentEventMode === 'none') contentEventMode = 'message';
         metrics.contentChunkCount += 1;
       }
-      if (reasoningPart) reasoningContent += reasoningPart;
+      if (deltaReasoning) {
+        reasoningContent += deltaReasoning;
+        reasoningEventMode = 'delta';
+      } else if (messageReasoning) {
+        reasoningContent = reasoningEventMode === 'delta'
+          ? reasoningContent + messageReasoning
+          : messageReasoning;
+        if (reasoningEventMode === 'none') reasoningEventMode = 'message';
+      }
+      metrics.contentCharacters = content.length;
+      metrics.reasoningCharacters = reasoningContent.length;
       if (choice?.finish_reason) {
         finishReason = choice.finish_reason;
         return true;
@@ -326,6 +355,8 @@ export async function readCorrectionResponse(
     try {
       const parsed = JSON.parse(trimmedRaw);
       const envelope = parseOpenAiEnvelope(parsed, rawText);
+      metrics.contentCharacters = envelope.content.length;
+      metrics.reasoningCharacters = envelope.reasoningContent.length;
       return {
         ...envelope,
         streamDoneReceived: false,
@@ -343,6 +374,9 @@ export async function readCorrectionResponse(
     finishReason: '',
     streamDoneReceived: false,
     transport: 'text',
-    metrics
+    metrics: {
+      ...metrics,
+      contentCharacters: rawText.length
+    }
   };
 }

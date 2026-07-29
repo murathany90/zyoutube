@@ -6,6 +6,7 @@ import {
   loadPrivateLiveGeminiEnvironment
 } from './helpers/load-private-env';
 import {
+  assertNoExtensionConsoleErrors,
   assertNoApiKeyLeak,
   launchLiveExtension,
   openApprovedCaptionedVideo
@@ -26,7 +27,6 @@ test('real Gemini Web session uses one tab and persists the summary', async ({},
   ).toBeTruthy();
   const session = await launchLiveExtension(testInfo, apiEnvironment, {
     userDataDir: apiEnvironment.liveUserDataDir,
-    channel: 'chrome',
     gemUrl: geminiEnvironment.gemUrl
   });
 
@@ -43,8 +43,11 @@ test('real Gemini Web session uses one tab and persists the summary', async ({},
       ).count() > 0;
     expect(needsLogin, 'GEMINI_SESSION_REQUIRED').toBe(false);
 
-    const video = await openApprovedCaptionedVideo(session, 2);
-    await video.page.getByRole('button', { name: 'Özet' }).click();
+    const video = await openApprovedCaptionedVideo(session, 3);
+    await video.page.getByRole('button', {
+      name: 'Özet',
+      exact: true
+    }).click();
     const engineSelect = video.page.locator('select').filter({
       has: video.page.locator('option[value="gemini-gem"]')
     });
@@ -82,6 +85,7 @@ test('real Gemini Web session uses one tab and persists the summary', async ({},
       stored.summary?.summary?.tr || stored.summary?.summary?.en
     ).toBeTruthy();
     assertNoApiKeyLeak(session);
+    assertNoExtensionConsoleErrors(session);
 
     console.log(JSON.stringify({
       approvedVideoId: video.videoId,

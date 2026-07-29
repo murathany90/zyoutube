@@ -6,7 +6,8 @@ import type { LiveCorrectionEnvironment } from './load-private-env';
 export const APPROVED_LIVE_VIDEOS = [
   'https://www.youtube.com/watch?v=yoYTTMBuptY',
   'https://www.youtube.com/watch?v=l7uS03e7Xug',
-  'https://www.youtube.com/watch?v=jjfc9yFbPqg'
+  'https://www.youtube.com/watch?v=jjfc9yFbPqg',
+  'https://www.youtube.com/watch?v=VGeYo5hzt8U&t=301s'
 ] as const;
 
 export interface LiveExtensionSession {
@@ -14,6 +15,7 @@ export interface LiveExtensionSession {
   background: Worker;
   extensionId: string;
   observedLogs: string[];
+  observedExtensionErrors: string[];
   environment: LiveCorrectionEnvironment;
 }
 
@@ -43,9 +45,40 @@ async function prepareLiveExtension(
   return liveExtension;
 }
 
-function observePage(page: Page, logs: string[]) {
-  page.on('console', message => logs.push(message.text()));
-  page.on('pageerror', error => logs.push(error.message));
+const observedPages = new WeakSet<Page>();
+
+function observePage(
+  page: Page,
+  logs: string[],
+  extensionErrors: string[]
+) {
+  if (observedPages.has(page)) return;
+  observedPages.add(page);
+
+  page.on('console', message => {
+    const text = message.text();
+    logs.push(text);
+    const sourceUrl = message.location().url || '';
+    if (
+      message.type() === 'error' &&
+      (
+        sourceUrl.startsWith('chrome-extension://') ||
+        /ZYouTube|\[Transcript\]/.test(text)
+      )
+    ) {
+      extensionErrors.push(text);
+    }
+  });
+  page.on('pageerror', error => {
+    logs.push(error.message);
+    if (
+      /chrome-extension:|ZYouTube|\[Transcript\]/.test(
+        `${error.message}\n${error.stack || ''}`
+      )
+    ) {
+      extensionErrors.push(error.message);
+    }
+  });
 }
 
 export async function launchLiveExtension(
@@ -58,27 +91,38 @@ export async function launchLiveExtension(
     environment
   );
   const observedLogs: string[] = [];
+  const observedExtensionErrors: string[] = [];
   const context = await chromium.launchPersistentContext(
     options.userDataDir ||
       environment.liveUserDataDir ||
       testInfo.outputPath('chromium-profile'),
     {
       headless: false,
-      ...(options.channel || environment.liveUserDataDir
-        ? { channel: options.channel || 'chrome' as const }
-        : {}),
+      ...(options.channel ? { channel: options.channel } : {}),
       args: [
         `--disable-extensions-except=${extensionPath}`,
         `--load-extension=${extensionPath}`
       ]
     }
   );
-  context.on('page', page => observePage(page, observedLogs));
+  context.on('page', page => observePage(
+    page,
+    observedLogs,
+    observedExtensionErrors
+  ));
 
   let [background] = context.serviceWorkers();
   if (!background) background = await context.waitForEvent('serviceworker');
-  background.on('console', message => observedLogs.push(message.text()));
-  background.on('pageerror', error => observedLogs.push(error.message));
+  background.on('console', message => {
+    observedLogs.push(message.text());
+    if (message.type() === 'error') {
+      observedExtensionErrors.push(message.text());
+    }
+  });
+  background.on('pageerror', error => {
+    observedLogs.push(error.message);
+    observedExtensionErrors.push(error.message);
+  });
 
   const providerConfig = {
     id: 'openai-compatible',
@@ -103,7 +147,8 @@ export async function launchLiveExtension(
     correctionStreaming: environment.correctionStreaming,
     correctionStreamOptions: environment.correctionStreamOptions,
     correctionJsonMode: environment.correctionJsonMode,
-    correctionEnableReasoning: false
+    correctionEnableReasoning: false,
+    correctionCompatibilityVersion: 3
   };
 
   await background.evaluate(async ({ config, apiKey, gemUrl }) => {
@@ -156,6 +201,7 @@ export async function launchLiveExtension(
     background,
     extensionId: new URL(background.url()).hostname,
     observedLogs,
+    observedExtensionErrors,
     environment
   };
 }
@@ -179,7 +225,11 @@ export async function openApprovedCaptionedVideo(
   for (const url of orderedUrls) {
     const videoId = new URL(url).searchParams.get('v')!;
     const page = await session.context.newPage();
-    observePage(page, session.observedLogs);
+    observePage(
+      page,
+      session.observedLogs,
+      session.observedExtensionErrors
+    );
 
     try {
       await page.goto(url, {
@@ -242,4 +292,10 @@ export function assertNoApiKeyLeak(session: LiveExtensionSession) {
   expect(session.observedLogs.join('\n')).not.toContain(
     session.environment.apiKey
   );
+}
+
+export function assertNoExtensionConsoleErrors(
+  session: LiveExtensionSession
+) {
+  expect(session.observedExtensionErrors).toEqual([]);
 }

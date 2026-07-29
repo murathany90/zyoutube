@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadPrivateLiveCorrectionEnvironment } from './helpers/load-private-env';
 import {
+  assertNoExtensionConsoleErrors,
   assertNoApiKeyLeak,
   launchLiveExtension,
   openApprovedCaptionedVideo
@@ -20,11 +21,22 @@ test('real YouTube captions reach API correction, UI, CorrectionDB and History',
   const session = await launchLiveExtension(testInfo, environment);
 
   try {
-    const video = await openApprovedCaptionedVideo(session, 0);
+    const video = await openApprovedCaptionedVideo(session, 3);
     await video.page.getByRole('button', { name: /Düzelt/ }).click();
-    await expect(video.page.getByText(/Düzeltme tamamlandı/)).toBeVisible({
-      timeout: 240000
-    });
+    const completionMessage = video.page.getByText(/Düzeltme tamamlandı/);
+    const errorMessage = video.page.locator('.bg-red-100').last();
+    const terminalState = await Promise.race([
+      completionMessage.waitFor({ state: 'visible', timeout: 240000 })
+        .then(() => 'completed' as const),
+      errorMessage.waitFor({ state: 'visible', timeout: 240000 })
+        .then(() => 'failed' as const)
+    ]);
+    if (terminalState === 'failed') {
+      throw new Error(
+        `Live correction failed: ${(await errorMessage.textContent())?.trim()}`
+      );
+    }
+    await expect(completionMessage).toBeVisible();
     await expect(video.page.getByRole('option', {
       name: 'Orijinal + Düzeltilmiş'
     })).toBeAttached();
@@ -55,6 +67,7 @@ test('real YouTube captions reach API correction, UI, CorrectionDB and History',
     await expect(historyPage.getByText('Kayıt bulunamadı.')).not.toBeVisible();
 
     assertNoApiKeyLeak(session);
+    assertNoExtensionConsoleErrors(session);
     console.log(JSON.stringify({
       approvedVideoId: video.videoId,
       realTranscriptSegments: video.transcriptLength,

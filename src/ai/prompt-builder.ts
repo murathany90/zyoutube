@@ -91,6 +91,8 @@ ${instructions}`;
     
     if (config.enableReasoning === true) {
       body.chat_template_kwargs = { thinking: true, reasoning_effort: "high" };
+    } else {
+      body.chat_template_kwargs = { thinking: false };
     }
 
     if (

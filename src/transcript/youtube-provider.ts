@@ -9,6 +9,7 @@ import { sendRuntimeMessage } from '../content/runtime-messenger';
 export class YouTubeTranscriptProvider implements ITranscriptProvider {
 
   private FORMATS = ['', 'json3', 'srv3', 'vtt'];
+  private transcriptCache = new Map<string, TranscriptResult>();
 
   private extractJSONFromScript(html: string): any {
     const patterns = [
@@ -281,6 +282,34 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
   }
 
   async fetchTranscript(videoId: string, track: CaptionTrack, abortController?: AbortController, tlang?: string): Promise<TranscriptResult> {
+    if (abortController?.signal.aborted) {
+      throw new DOMException('Aborted', 'AbortError');
+    }
+
+    const cacheKey = JSON.stringify([
+      videoId,
+      track.baseUrl,
+      track.languageCode,
+      tlang || ''
+    ]);
+    const cached = this.transcriptCache.get(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.fetchTranscriptUncached(
+      videoId,
+      track,
+      abortController,
+      tlang
+    );
+    this.transcriptCache.set(cacheKey, result);
+    if (this.transcriptCache.size > 8) {
+      const oldestKey = this.transcriptCache.keys().next().value;
+      if (oldestKey) this.transcriptCache.delete(oldestKey);
+    }
+    return result;
+  }
+
+  private async fetchTranscriptUncached(videoId: string, track: CaptionTrack, abortController?: AbortController, tlang?: string): Promise<TranscriptResult> {
     let rawText: string | null = null;
     let usedFormat: string | undefined;
     let lastError: string | undefined;
@@ -292,7 +321,7 @@ export class YouTubeTranscriptProvider implements ITranscriptProvider {
 
     // Phase 1: Native player request capture (for translations or PoToken)
     if (shouldUseNativePlayer) {
-      console.warn(`ZYouTube [Transcript] Using Native Caption Body Capture V2 (tlang=${tlang || 'none'}, exp=${requiresPoToken})`);
+      console.info(`ZYouTube [Transcript] Native caption capture started (tlang=${tlang || 'none'}, protected=${requiresPoToken})`);
       try {
         const requestId = Math.random().toString();
         const timeoutMs = 20000;

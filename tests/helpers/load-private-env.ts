@@ -68,7 +68,7 @@ export function loadPrivateLiveCorrectionEnvironment(
   }
 
   const correctionMaxTokens = Number(
-    values.ZYOUTUBE_CORRECTION_MAX_TOKENS || '130000'
+    values.ZYOUTUBE_CORRECTION_MAX_TOKENS || '16384'
   );
   if (!Number.isFinite(correctionMaxTokens) || correctionMaxTokens <= 0) {
     throw new Error('ZYOUTUBE_CORRECTION_MAX_TOKENS must be a positive number.');
@@ -116,7 +116,7 @@ export function loadPrivateLiveCorrectionEnvironment(
     ),
     correctionJsonMode: parseBoolean(
       values.ZYOUTUBE_CORRECTION_JSON_MODE,
-      true
+      false
     ),
     ...(values.ZYOUTUBE_LIVE_USER_DATA_DIR
       ? {

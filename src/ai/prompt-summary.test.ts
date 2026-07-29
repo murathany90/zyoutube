@@ -49,6 +49,7 @@ describe('PromptBuilder summary compatibility settings', () => {
     expect(body.stream).toBeUndefined();
     expect(body.stream_options).toBeUndefined();
     expect(body.response_format).toBeUndefined();
+    expect(body.chat_template_kwargs).toEqual({ thinking: false });
   });
 
   it('enables streaming, stream_options and JSON mode independently', () => {
@@ -62,5 +63,6 @@ describe('PromptBuilder summary compatibility settings', () => {
     expect(body.stream).toBe(true);
     expect(body.stream_options).toEqual({ include_usage: true });
     expect(body.response_format).toEqual({ type: 'json_object' });
+    expect(body.chat_template_kwargs).toEqual({ thinking: false });
   });
 });
