@@ -128,7 +128,10 @@ export interface AIProvider {
 
   isConfigured(): Promise<boolean>;
   validateConfiguration(): Promise<ProviderValidationResult>;
-  testConnection(signal?: AbortSignal): Promise<ConnectionTestResult>;
+  testConnection(
+    signal?: AbortSignal,
+    requestType?: 'summary' | 'correction'
+  ): Promise<ConnectionTestResult>;
 
   summarize(
     request: SummaryRequest,

@@ -9,8 +9,32 @@ import {
 } from '../types';
 import { AIProviderError } from '../errors';
 import { PromptBuilder } from '../prompt-builder';
+import { CorrectionPromptBuilder } from '../prompt-correction';
+import { CorrectionResponseParser } from '../correction-parser';
 import { ResponseParser } from '../response-parser';
 import { AISettingsService } from '../../settings/ai-settings';
+import {
+  CorrectionResponseTimeoutError,
+  readCorrectionResponse
+} from '../../offscreen/correction-response-reader';
+import type { AIProviderConfig } from '../../settings/types';
+
+type RequestType = 'summary' | 'correction';
+
+interface SafeHttpMetadata {
+  httpStatus: number;
+  contentType: string;
+  bodyCharacterCount: number;
+  providerErrorCode?: string;
+  providerErrorType?: string;
+  requestId?: string;
+}
+
+function safeMetadataToken(value: unknown): string | undefined {
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+  const token = String(value);
+  return /^[A-Za-z0-9._:/-]{1,128}$/.test(token) ? token : undefined;
+}
 
 export class OpenAICompatibleProvider implements AIProvider {
   readonly id: AIProviderId = 'openai-compatible';
@@ -18,7 +42,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
   async isConfigured(): Promise<boolean> {
     const config = await AISettingsService.getProviderConfig(this.id);
-    return !!(config?.apiKey && config?.baseUrl);
+    return Boolean(config?.apiKey && config?.baseUrl);
   }
 
   async validateConfiguration(): Promise<ProviderValidationResult> {
@@ -26,77 +50,123 @@ export class OpenAICompatibleProvider implements AIProvider {
     const errors: string[] = [];
     if (!config?.apiKey) errors.push('API anahtarı eksik.');
     if (!config?.baseUrl) errors.push('Base URL eksik.');
-    
     return { isValid: errors.length === 0, errors };
   }
 
-  async testConnection(signal?: AbortSignal): Promise<ConnectionTestResult> {
+  async testConnection(
+    signal?: AbortSignal,
+    requestType: RequestType = 'summary'
+  ): Promise<ConnectionTestResult> {
     const config = await AISettingsService.getProviderConfig(this.id);
     if (!config?.apiKey || !config?.baseUrl) {
-      return { success: false, message: 'API anahtarı veya Base URL yapılandırılmamış.' };
+      return {
+        success: false,
+        message: 'API anahtarı veya Base URL yapılandırılmamış.'
+      };
     }
 
-    let urlStr = config.baseUrl;
-    while (urlStr.endsWith('/')) urlStr = urlStr.slice(0, -1);
-    const url = urlStr.endsWith('/chat/completions') ? urlStr : `${urlStr}/chat/completions`;
+    const summaryRequest = this.createConnectionSummaryRequest();
+    const correctionRequest = {
+      taskId: 'connection-correction',
+      video: { videoId: 'connection-test', title: 'Connection Test' },
+      transcript: {
+        sourceLanguage: 'tr' as const,
+        segments: [{
+          id: 'segment-1',
+          startTimeMs: 0,
+          endTimeMs: 1000,
+          turkish: 'Bu bir bağlantı testidir.',
+          english: 'This is a connection test.'
+        }]
+      }
+    };
+    const body = requestType === 'correction'
+      ? CorrectionPromptBuilder.buildApiRequestBody(correctionRequest, config)
+      : PromptBuilder.buildApiRequestBody(summaryRequest, config);
+    const startedAt = performance.now();
 
     try {
-      const payload = {
-        model: config.model || 'deepseek-chat',
-        messages: [{ role: 'user', content: 'Merhaba, bu bir test mesajıdır. Lütfen API bağlantısının başarılı olduğunu belirten çok kısa bir Türkçe özet yanıt ver.' }],
-        max_tokens: 50
-      };
-
-      const start = performance.now();
-      const res = await fetch(url, {
+      const response = await fetch(this.getEndpoint(config.baseUrl), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.apiKey}`,
-          ...config.customHeaders
-        },
-        body: JSON.stringify(payload),
+        headers: this.getHeaders(config),
+        body: JSON.stringify(body),
         signal
       });
-      const latencyMs = Math.round(performance.now() - start);
+      const latencyMs = Math.round(performance.now() - startedAt);
 
-      if (!res.ok) {
-        let errorMsg = res.statusText;
-        try {
-          const rawText = await res.text();
-          try {
-            const errorData = JSON.parse(rawText);
-            errorMsg = errorData?.error?.message || errorData?.message || rawText.slice(0, 500);
-          } catch {
-            errorMsg = rawText.slice(0, 500);
-          }
-        } catch {
-          /* ignore */
-        }
-        return { success: false, message: `Bağlantı hatası: ${res.status} ${errorMsg}` };
+      if (!response.ok) {
+        const metadata = await this.readSafeHttpMetadata(response);
+        return {
+          success: false,
+          latencyMs,
+          message: this.safeConnectionErrorMessage(requestType, metadata)
+        };
       }
 
-      let aiResponseText = '';
-      try {
-        const data = await res.json();
-        aiResponseText = data.choices?.[0]?.message?.content || '';
-      } catch (e) {}
+      const readResult = await readCorrectionResponse(response, {
+        expectedStreaming: Boolean(body.stream),
+        firstByteTimeoutMs: requestType === 'correction'
+          ? config.correctionFirstByteTimeoutMs ?? 60000
+          : config.summaryFirstByteTimeoutMs ?? 60000,
+        streamIdleTimeoutMs: requestType === 'correction'
+          ? config.correctionStreamIdleTimeoutMs ?? 45000
+          : config.summaryStreamIdleTimeoutMs ?? 45000,
+        requestStartedAtMs: startedAt
+      });
 
-      const limitRequests = res.headers.get('x-ratelimit-remaining-requests') || res.headers.get('x-ratelimit-limit-requests') || res.headers.get('ratelimit-remaining') || res.headers.get('x-ratelimit-remaining');
-      const limitTokens = res.headers.get('x-ratelimit-remaining-tokens') || res.headers.get('x-ratelimit-limit-tokens') || res.headers.get('ratelimit-limit') || res.headers.get('x-ratelimit-limit');
-      let limitsStr = '';
-      if (limitRequests || limitTokens) {
-        limitsStr = `İstek: ${limitRequests || '?'} | Token: ${limitTokens || '?'}`;
+      if (!readResult.content.trim()) {
+        return {
+          success: false,
+          latencyMs,
+          message: `${this.requestTypeLabel(requestType)} yanıtında final içerik bulunamadı.`
+        };
       }
 
-      return { success: true, latencyMs, limits: limitsStr, message: aiResponseText };
-    } catch (e: any) {
-      if (e.name === 'AbortError') return { success: false, message: 'İstek iptal edildi.' };
-      return { success: false, message: e.message || 'Bilinmeyen bağlantı hatası.' };
+      if (requestType === 'correction') {
+        CorrectionResponseParser.parse(
+          readResult.content,
+          readResult.finishReason
+        );
+      } else {
+        ResponseParser.parseAndValidate(
+          readResult.content,
+          summaryRequest.taskId,
+          summaryRequest.video.videoId,
+          this.id,
+          config.model || 'default',
+          summaryRequest.options,
+          undefined,
+          summaryRequest.transcript.segments
+        );
+      }
+
+      return {
+        success: true,
+        latencyMs,
+        limits: this.readRateLimits(response),
+        message: `${this.requestTypeLabel(requestType)} istek formatı ve yanıt ayrıştırması doğrulandı.`
+      };
+    } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        return { success: false, message: 'İstek iptal edildi.' };
+      }
+      if (error instanceof CorrectionResponseTimeoutError) {
+        return {
+          success: false,
+          message: `${this.requestTypeLabel(requestType)} yanıtı zaman aşımına uğradı (${error.timeoutKind}).`
+        };
+      }
+      return {
+        success: false,
+        message: `${this.requestTypeLabel(requestType)} formatı doğrulanamadı.`
+      };
     }
   }
 
-  async summarize(request: SummaryRequest, context: ProviderExecutionContext): Promise<SummaryResult> {
+  async summarize(
+    request: SummaryRequest,
+    context: ProviderExecutionContext
+  ): Promise<SummaryResult> {
     const config = await AISettingsService.getProviderConfig(this.id);
     if (!config?.apiKey || !config?.baseUrl) {
       throw new AIProviderError({
@@ -107,83 +177,62 @@ export class OpenAICompatibleProvider implements AIProvider {
       });
     }
 
-    let urlStr = config.baseUrl;
-    while (urlStr.endsWith('/')) urlStr = urlStr.slice(0, -1);
-    const url = urlStr.endsWith('/chat/completions') ? urlStr : `${urlStr}/chat/completions`;
-
     const model = config.model || 'gpt-3.5-turbo';
-    const systemPrompt = PromptBuilder.buildSystemPrompt(request, context.promptType);
-    const userPrompt = PromptBuilder.buildUserPrompt(request, context.promptType, context.customContent);
+    const body = PromptBuilder.buildApiRequestBody(
+      request,
+      config,
+      context.customContent
+    );
+    const controller = new AbortController();
+    let timedOut = false;
+    const onParentAbort = () => controller.abort();
 
-    const isNvidiaNIM = urlStr.includes('integrate.api.nvidia.com') || urlStr.includes('nvcr.io');
-    
-    const body: any = {
-      model: model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt }
-      ],
-      temperature: config.temperature ?? 0.7,
-      max_tokens: config.maxTokens,
-    };
-    
-    if (isNvidiaNIM && model.includes('deepseek')) {
-      // NVIDIA deepseek-v4-flash NIM settings
-      body.chat_template_kwargs = { thinking: true, reasoning_effort: "high" };
-    } else if (config.responseMode === 'json') {
-      body.response_format = { type: 'json_object' };
+    if (context.signal?.aborted) {
+      controller.abort();
+    } else {
+      context.signal?.addEventListener('abort', onParentAbort, { once: true });
     }
 
-    let controller = new AbortController();
-    let onParentAbort: (() => void) | null = null;
-    if (context.signal) {
-      onParentAbort = () => controller.abort();
-      context.signal.addEventListener('abort', onParentAbort, { once: true });
-    }
-
-    // Default 180s, minimum 60s — NVIDIA NIM gibi yavaş API'ler için yeterli süre
     const timeoutMs = Math.max(config.timeoutMs || 180000, 60000);
     const timeoutId = setTimeout(() => {
-       controller.abort(new Error('Timeout'));
+      timedOut = true;
+      controller.abort(new Error('Summary total timeout'));
     }, timeoutMs);
 
     try {
-      if (context.onProgress) context.onProgress('Özetleniyor...', 50);
-
-      const response = await fetch(url, {
+      context.onProgress?.('Özetleniyor...', 50);
+      const requestStartedAt = performance.now();
+      const response = await fetch(this.getEndpoint(config.baseUrl), {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.apiKey}`,
-          ...config.customHeaders
-        },
+        headers: this.getHeaders(config),
         body: JSON.stringify(body),
         signal: controller.signal
       });
 
-      clearTimeout(timeoutId);
+      if (!response.ok) await this.handleErrorResponse(response);
 
-      // Abort listener temizliği (memory leak önleme)
-      if (onParentAbort && context.signal) {
-        context.signal.removeEventListener('abort', onParentAbort);
-      }
+      const readResult = await readCorrectionResponse(response, {
+        expectedStreaming: Boolean(body.stream),
+        firstByteTimeoutMs: config.summaryFirstByteTimeoutMs ?? 60000,
+        streamIdleTimeoutMs: config.summaryStreamIdleTimeoutMs ?? 45000,
+        requestStartedAtMs: requestStartedAt,
+        onProgress: () => context.onProgress?.('Yanıt alınıyor...', 75)
+      });
 
-      if (!response.ok) {
-        await this.handleErrorResponse(response);
-      }
-
-      const data = await response.json();
-      if (!data.choices || data.choices.length === 0) {
+      if (
+        body.stream &&
+        readResult.transport === 'sse' &&
+        !readResult.streamDoneReceived &&
+        !readResult.finishReason
+      ) {
         throw new AIProviderError({
           code: 'INVALID_RESPONSE',
-          userMessage: 'API boş yanıt döndürdü.',
+          userMessage: 'API yanıt akışı tamamlanmadan kapandı.',
           retryable: true,
           providerId: this.id
         });
       }
-
-      const choice = data.choices[0];
-      if (choice.finish_reason === 'content_filter') {
+      if (readResult.finishReason === 'content_filter') {
         throw new AIProviderError({
           code: 'CONTENT_BLOCKED',
           userMessage: 'İçerik güvenlik filtresi tarafından engellendi.',
@@ -191,20 +240,19 @@ export class OpenAICompatibleProvider implements AIProvider {
           providerId: this.id
         });
       }
-
-      let text = choice.message?.content;
-      
-      // NVIDIA deepseek gibi modeller sadece reasoning_content döndürebilir
-      // Bu durumda reasoning'i content olarak kullan (hata fırlatmak yerine)
-      if (!text && choice.message?.reasoning_content) {
-        console.warn('[ZYouTube] API sadece reasoning_content döndürdü, içerik olarak kullanılıyor.');
-        text = choice.message.reasoning_content;
+      if (!readResult.content.trim()) {
+        throw new AIProviderError({
+          code: 'INVALID_RESPONSE',
+          userMessage: readResult.reasoningContent.trim()
+            ? 'Model yalnızca akıl yürütme içeriği döndürdü; final cevap bulunamadı.'
+            : 'API boş yanıt döndürdü.',
+          retryable: true,
+          providerId: this.id
+        });
       }
-      
-      text = text || '';
-      
-      const parsedResult = ResponseParser.parseAndValidate(
-        text,
+
+      return ResponseParser.parseAndValidate(
+        readResult.content,
         request.taskId,
         request.video.videoId,
         this.id,
@@ -213,108 +261,194 @@ export class OpenAICompatibleProvider implements AIProvider {
         request.video.durationMs || undefined,
         request.transcript.segments
       );
+    } catch (error: any) {
+      if (error instanceof AIProviderError) throw error;
 
-      if (data.usage) {
-        parsedResult.usage = {
-          inputTokens: data.usage.prompt_tokens,
-          outputTokens: data.usage.completion_tokens,
-          totalTokens: data.usage.total_tokens
-        };
-      }
-
-      return parsedResult;
-    } catch (e: any) {
-      clearTimeout(timeoutId);
-
-      // Abort listener temizliği
-      if (onParentAbort && context.signal) {
-        context.signal.removeEventListener('abort', onParentAbort);
-      }
-
-      if (e instanceof AIProviderError) throw e;
-
-      if (e.name === 'AbortError' || e.message === 'Timeout') {
-        const isTimeout = e.message === 'Timeout';
+      if (timedOut || error instanceof CorrectionResponseTimeoutError) {
         throw new AIProviderError({
-          code: isTimeout ? 'REQUEST_TIMEOUT' : 'REQUEST_CANCELLED',
-          userMessage: isTimeout 
-            ? 'API isteği 180 saniye içinde tamamlanamadı. Daha kısa bir transkript veya farklı bir model deneyin.'
-            : 'İstek iptal edildi.',
-          retryable: isTimeout,
+          code: 'REQUEST_TIMEOUT',
+          userMessage: 'API özet isteği zaman aşımına uğradı.',
+          retryable: true,
           providerId: this.id,
-          debugMessage: e.toString()
+          debugMessage: error instanceof CorrectionResponseTimeoutError
+            ? `timeoutKind=${error.timeoutKind}`
+            : 'timeoutKind=total'
+        });
+      }
+      if (
+        context.signal?.aborted ||
+        error?.name === 'AbortError' ||
+        error?.message === 'AbortError'
+      ) {
+        throw new AIProviderError({
+          code: 'REQUEST_CANCELLED',
+          userMessage: 'İstek iptal edildi.',
+          retryable: false,
+          providerId: this.id
         });
       }
 
       throw new AIProviderError({
         code: 'NETWORK_ERROR',
-        userMessage: 'Ağ veya bağlantı hatası oluştu. İnternet bağlantınızı kontrol edin.',
+        userMessage: 'Ağ veya bağlantı hatası oluştu.',
         retryable: true,
         providerId: this.id,
-        debugMessage: e.toString()
+        debugMessage: safeMetadataToken(error?.code) || error?.name || 'Error'
       });
+    } finally {
+      clearTimeout(timeoutId);
+      context.signal?.removeEventListener('abort', onParentAbort);
     }
   }
 
-  private async handleErrorResponse(response: Response) {
-    let message = response.statusText;
+  private createConnectionSummaryRequest(): SummaryRequest {
+    return {
+      taskId: 'connection-summary',
+      video: {
+        videoId: 'connection-test',
+        title: 'Connection Test',
+        url: 'https://www.youtube.com/watch?v=connection-test'
+      },
+      transcript: {
+        languageCode: 'tr',
+        sourceType: 'manual',
+        qualityLevel: 'high',
+        qualityReasons: [],
+        segments: [{
+          id: 'segment-1',
+          sequence: 1,
+          startTimeMs: 0,
+          endTimeMs: 1000,
+          durationMs: 1000,
+          text: 'Bu bir bağlantı testidir.',
+          cleanText: 'Bu bir bağlantı testidir.',
+          languageCode: 'tr'
+        }]
+      },
+      options: {
+        length: 'short',
+        outputLanguage: 'tr',
+        includeKeyIdeas: true,
+        includeSections: true,
+        includeActionItems: true
+      },
+      engine: 'openai-compatible'
+    };
+  }
+
+  private getEndpoint(baseUrl: string): string {
+    const normalized = baseUrl.replace(/\/+$/, '');
+    return normalized.endsWith('/chat/completions')
+      ? normalized
+      : `${normalized}/chat/completions`;
+  }
+
+  private getHeaders(config: AIProviderConfig): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${config.apiKey}`,
+      ...config.customHeaders
+    };
+  }
+
+  private requestTypeLabel(requestType: RequestType): string {
+    return requestType === 'correction' ? 'Düzeltme' : 'Özet';
+  }
+
+  private safeConnectionErrorMessage(
+    requestType: RequestType,
+    metadata: SafeHttpMetadata
+  ): string {
+    const errorCode = metadata.providerErrorCode
+      ? `, kod=${metadata.providerErrorCode}`
+      : '';
+    return `${this.requestTypeLabel(requestType)} bağlantı hatası: HTTP ${metadata.httpStatus}${errorCode}.`;
+  }
+
+  private async readSafeHttpMetadata(response: Response): Promise<SafeHttpMetadata> {
+    let rawText = '';
+    let providerErrorCode: string | undefined;
+    let providerErrorType: string | undefined;
+
     try {
-      const rawText = await response.text();
-      try {
-        const errorData = JSON.parse(rawText);
-        message = errorData?.error?.message || errorData?.message || rawText.slice(0, 500);
-      } catch {
-        message = rawText.slice(0, 500);
-      }
+      rawText = await response.text();
+      const parsed = JSON.parse(rawText);
+      providerErrorCode = safeMetadataToken(
+        parsed?.error?.code ?? parsed?.code
+      );
+      providerErrorType = safeMetadataToken(
+        parsed?.error?.type ?? parsed?.type
+      );
     } catch {
-      /* ignore */
+      // Response body is intentionally discarded.
     }
+
+    const requestId = safeMetadataToken(
+      response.headers.get('x-request-id') ??
+      response.headers.get('request-id') ??
+      response.headers.get('cf-ray')
+    );
+
+    return {
+      httpStatus: response.status,
+      contentType: response.headers.get('content-type') || 'unknown',
+      bodyCharacterCount: rawText.length,
+      ...(providerErrorCode ? { providerErrorCode } : {}),
+      ...(providerErrorType ? { providerErrorType } : {}),
+      ...(requestId ? { requestId } : {})
+    };
+  }
+
+  private readRateLimits(response: Response): string | undefined {
+    const requests = response.headers.get('x-ratelimit-remaining-requests') ||
+      response.headers.get('x-ratelimit-limit-requests') ||
+      response.headers.get('ratelimit-remaining');
+    const tokens = response.headers.get('x-ratelimit-remaining-tokens') ||
+      response.headers.get('x-ratelimit-limit-tokens') ||
+      response.headers.get('ratelimit-limit');
+    return requests || tokens
+      ? `İstek: ${requests || '?'} | Token: ${tokens || '?'}`
+      : undefined;
+  }
+
+  private async handleErrorResponse(response: Response): Promise<never> {
+    const metadata = await this.readSafeHttpMetadata(response);
+    const common = {
+      providerId: this.id,
+      statusCode: response.status,
+      debugMessage: JSON.stringify(metadata)
+    };
 
     if (response.status === 401) {
       throw new AIProviderError({
+        ...common,
         code: 'INVALID_API_KEY',
-        userMessage: 'Geçersiz API Anahtarı.',
-        retryable: false,
-        providerId: this.id,
-        statusCode: 401
+        userMessage: 'Geçersiz API anahtarı.',
+        retryable: false
       });
     }
     if (response.status === 404) {
       throw new AIProviderError({
+        ...common,
         code: 'MODEL_NOT_FOUND',
         userMessage: 'Model bulunamadı veya Base URL yanlış.',
-        retryable: false,
-        providerId: this.id,
-        statusCode: 404
+        retryable: false
       });
     }
     if (response.status === 429) {
-      // Retry-after header bilgisi varsa kullanıcıya bildir
-      const retryAfter = response.headers.get('retry-after');
-      const remaining = response.headers.get('x-ratelimit-remaining-requests') || response.headers.get('ratelimit-remaining');
-      let userMsg = 'Kota aşıldı veya Rate Limit sınırına takıldınız.';
-      if (retryAfter) {
-        userMsg += ` ${retryAfter} saniye sonra tekrar deneyin.`;
-      }
-      if (remaining) {
-        userMsg += ` (Kalan istek: ${remaining})`;
-      }
       throw new AIProviderError({
+        ...common,
         code: 'QUOTA_EXCEEDED',
-        userMessage: userMsg,
-        retryable: true,
-        providerId: this.id,
-        statusCode: 429
+        userMessage: 'Kota aşıldı veya istek sınırına ulaşıldı.',
+        retryable: true
       });
     }
 
     throw new AIProviderError({
+      ...common,
       code: 'UNKNOWN_ERROR',
-      userMessage: `Bilinmeyen sunucu hatası: ${response.status}`,
-      retryable: response.status >= 500,
-      providerId: this.id,
-      statusCode: response.status,
-      debugMessage: message
+      userMessage: `Sunucu hatası: HTTP ${response.status}.`,
+      retryable: response.status >= 500
     });
   }
 }

@@ -1,5 +1,14 @@
 import { VideoLibraryEntry } from '../history/library-service';
 
+export function getLibraryCardState(entry: VideoLibraryEntry) {
+  return {
+    showSummaryBadge: entry.hasSummary,
+    showTranscriptBadge: entry.hasOriginalTranscript,
+    showCorrectionBadge: entry.hasCorrectedTranscript,
+    showNoSummary: !entry.hasSummary && entry.hasOriginalTranscript
+  };
+}
+
 export function filterLibraryEntries(
   entries: VideoLibraryEntry[],
   searchQuery: string,

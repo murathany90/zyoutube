@@ -1,18 +1,19 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { SummaryResult, AITaskStatus, SummaryRequest } from '../../ai/types';
 import { YouTubeTranscriptProvider } from '../../transcript/youtube-provider';
 import { AISettingsService } from '../../settings/ai-settings';
 import { SummaryEngine } from '../../gem/types';
 import { sendRuntimeMessage } from '../runtime-messenger';
-import { HistoryService } from '../../settings/history';
 import { TranscriptSegment, TranscriptResult } from '../../transcript/types';
 import { renderSimpleMarkdown } from '../../utils/formatters';
+import { persistDeliveredSummary } from '../summary-result-delivery';
 
 export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', currentTranscript: externalTranscript }: { videoId: string; title: string; url: string; activeSection?: 'summary' | 'sonuc' | 'cikarimlar' | 'arastir'; currentTranscript?: TranscriptResult | null }) => {
   const [status, setStatus] = useState<AITaskStatus>('queued');
   const [progressMessage, setProgressMessage] = useState<string>('');
   const [result, setResult] = useState<SummaryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [persistenceWarning, setPersistenceWarning] = useState<string | null>(null);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -20,6 +21,34 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', cur
   const watchdogTimerRef = useRef<number | null>(null);
   const absoluteTimeoutRef = useRef<number | null>(null);
   const [currentTranscript, setCurrentTranscript] = useState<TranscriptSegment[] | null>(null);
+  const currentTranscriptRef = useRef<TranscriptSegment[] | null>(null);
+
+  useEffect(() => {
+    currentTranscriptRef.current = currentTranscript;
+  }, [currentTranscript]);
+
+  const completeSummary = useCallback((summaryResult: SummaryResult) => {
+    setResult(summaryResult);
+    setStatus('completed');
+    setIsProcessing(false);
+    setPersistenceWarning(null);
+    clearTimers();
+
+    const transcript =
+      currentTranscriptRef.current ||
+      externalTranscript?.segments ||
+      [];
+
+    persistDeliveredSummary({
+      result: summaryResult,
+      videoInfo: { videoId, title, url },
+      transcript
+    }).catch(() => {
+      setPersistenceWarning(
+        'Özet tamamlandı fakat geçmişe kaydedilemedi. Sonuç bu ekranda korunuyor.'
+      );
+    });
+  }, [externalTranscript, videoId, title, url]);
 
   const clearTimers = () => {
     if (watchdogTimerRef.current) {
@@ -83,19 +112,34 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', cur
     setProgressMessage('');
     setResult(null);
     setError(null);
+    setPersistenceWarning(null);
     setIsProcessing(false);
-    if (taskId) {
-      sendRuntimeMessage({ type: 'CANCEL_SUMMARY', taskId }).catch(console.error);
-      setTaskId(null);
-      activeTaskIdRef.current = null;
-    }
+    setTaskId(null);
+    activeTaskIdRef.current = null;
     setCurrentTranscript(null);
 
-    // Reconnect to active task
-    sendRuntimeMessage({ type: 'GET_ACTIVE_API_TASK', videoId }).then(res => {
+    // Reconnect to an active task or replay a durable terminal result.
+    sendRuntimeMessage({ type: 'GET_SUMMARY_TASK_STATE', videoId }).then(res => {
        if (res?.success && res.task) {
           setTaskId(res.task.taskId);
           activeTaskIdRef.current = res.task.taskId;
+          if (res.task.terminalMessage?.type === 'SUMMARY_COMPLETED') {
+            completeSummary(res.task.terminalMessage.result);
+            return;
+          }
+          if (res.task.terminalMessage?.type === 'SUMMARY_FAILED') {
+            setError(
+              res.task.terminalMessage.error?.userMessage ||
+              'Bir hata oluştu.'
+            );
+            setStatus('failed');
+            setIsProcessing(false);
+            sendRuntimeMessage({
+              type: 'ACK_SUMMARY_TERMINAL',
+              taskId: res.task.taskId
+            }).catch(() => undefined);
+            return;
+          }
           setIsProcessing(true);
           setStatus(res.task.status || 'preparing');
           setProgressMessage('İşleme devam ediliyor...');
@@ -103,7 +147,7 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', cur
           startAbsoluteTimer();
        }
     }).catch(console.error);
-  }, [videoId]);
+  }, [videoId, completeSummary]);
 
   // İlerleme ve sonuç dinleyicisi
   useEffect(() => {
@@ -124,28 +168,21 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', cur
       } else if (message.type === 'API_SUMMARY_HEARTBEAT' || message.type === 'API_SUMMARY_ACCEPTED') {
         startHeartbeatTimer();
       } else if (message.type === 'SUMMARY_COMPLETED') {
-        setResult(message.result);
-        setStatus('completed');
-        setIsProcessing(false);
-        clearTimers();
-        // Kaydet
-        if (currentTranscript) {
-          HistoryService.saveSummary(
-            message.result,
-            { videoId, title, url },
-            currentTranscript
-          ).catch(console.error);
-        }
+        completeSummary(message.result);
       } else if (message.type === 'SUMMARY_FAILED') {
         setError(message.error?.userMessage || 'Bir hata oluştu.');
         setStatus('failed');
         setIsProcessing(false);
         clearTimers();
+        sendRuntimeMessage({
+          type: 'ACK_SUMMARY_TERMINAL',
+          taskId: message.taskId
+        }).catch(() => undefined);
       }
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
-  }, [videoId, title, url, currentTranscript]);
+  }, [videoId, completeSummary]);
 
   const startSummary = async () => {
     try {
@@ -211,6 +248,11 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', cur
 
       if (!startResponse?.success) {
         throw new Error(startResponse?.error || 'Özet görevi başlatılamadı.');
+      }
+
+      if (startResponse.taskId && startResponse.taskId !== request.taskId) {
+        setTaskId(startResponse.taskId);
+        activeTaskIdRef.current = startResponse.taskId;
       }
       
       if (startResponse?.accepted) {
@@ -382,6 +424,12 @@ export const SummaryTab = ({ videoId, title, url, activeSection = 'summary', cur
     return (
       <div style={{ fontSize: '13px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {renderSelectors()}
+
+        {persistenceWarning && (
+          <div style={{ padding: '8px 10px', border: '1px solid #f59e0b', backgroundColor: '#fffbeb', color: '#92400e', borderRadius: '6px', fontSize: '12px' }}>
+            {persistenceWarning}
+          </div>
+        )}
         
         <div>
           <button onClick={startSummary}

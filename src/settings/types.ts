@@ -37,12 +37,20 @@ export interface AIProviderConfig {
   isSessionStorage?: boolean;
   responseMode?: 'markdown' | 'json';
   enableReasoning?: boolean;
+  summaryJsonMode?: boolean;
+  summaryStreaming?: boolean;
+  summaryStreamOptions?: boolean;
+  summaryCompatibilityVersion?: number;
+  summaryTokenParam?: 'max_tokens' | 'max_completion_tokens';
+  summaryFirstByteTimeoutMs?: number;
+  summaryStreamIdleTimeoutMs?: number;
   correctionJsonMode?: boolean;
   correctionMaxTokens?: number;
   correctionStreaming?: boolean;
   correctionStreamOptions?: boolean;
   correctionTokenParam?: 'max_tokens' | 'max_completion_tokens';
   correctionEnableReasoning?: boolean;
+  correctionCompatibilityVersion?: number;
 }
 
 export interface ExtensionSettings {
@@ -75,12 +83,20 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
       isSessionStorage: false,
       responseMode: 'markdown',
       enableReasoning: false,
-      correctionJsonMode: true,
-      correctionMaxTokens: 130000,
+      summaryJsonMode: false,
+      summaryStreaming: true,
+      summaryStreamOptions: true,
+      summaryCompatibilityVersion: 1,
+      summaryTokenParam: 'max_tokens',
+      summaryFirstByteTimeoutMs: 60000,
+      summaryStreamIdleTimeoutMs: 45000,
+      correctionJsonMode: false,
+      correctionMaxTokens: 16384,
       correctionStreaming: true,
       correctionStreamOptions: true,
       correctionTokenParam: 'max_tokens',
-      correctionEnableReasoning: false
+      correctionEnableReasoning: false,
+      correctionCompatibilityVersion: 3
     },
     'chrome-local': {
       id: 'chrome-local'

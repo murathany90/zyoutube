@@ -1,4 +1,4 @@
-import { filterLibraryEntries } from './filter-helpers';
+import { filterLibraryEntries, getLibraryCardState } from './filter-helpers';
 import { createRoot } from 'react-dom/client';
 import { useState, useEffect } from 'react';
 import '../styles/popup.css';
@@ -160,7 +160,7 @@ const Popup = () => {
     return true;
   };
 
-  const [testStatus, setTestStatus] = useState<{type: 'loading'|'success'|'error', message: string, latency?: number, limits?: string, aiResponse?: string} | null>(null);
+  const [testStatus, setTestStatus] = useState<{type: 'loading'|'success'|'error', message: string, latency?: number, limits?: string} | null>(null);
   
   const [showPreview, setShowPreview] = useState(false);
   const [previewTab, setPreviewTab] = useState<'json'|'prompt'>('json');
@@ -178,16 +178,19 @@ const Popup = () => {
     if (!saved) return;
     
     setTestStatus({ type: 'loading', message: 'Bağlantı test ediliyor, lütfen bekleyin...' });
-    chrome.runtime.sendMessage({ type: 'TEST_CONNECTION', providerId: id }, (response) => {
+    chrome.runtime.sendMessage({
+      type: 'TEST_CONNECTION',
+      providerId: id,
+      requestType: previewRequestType
+    }, (response) => {
       if (chrome.runtime.lastError) {
         setTestStatus({ type: 'error', message: 'Bağlantı hatası: ' + chrome.runtime.lastError.message });
       } else if (response && response.success) {
         setTestStatus({ 
           type: 'success', 
-          message: 'Bağlantı Başarılı!',
+          message: response.message || 'Bağlantı Başarılı!',
           latency: response.latencyMs,
-          limits: response.limits,
-          aiResponse: response.message
+          limits: response.limits
         });
       } else {
         setTestStatus({ type: 'error', message: `Bağlantı Başarısız!\nHata: ${response?.message || 'Bilinmeyen hata'}` });
@@ -235,10 +238,8 @@ const Popup = () => {
         borderBottom: '1px solid #e5e7eb', flexShrink: 0,
       }}>
         <h1 style={{ fontSize: '15px', fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="#ef4444">
-            <path d="M21.583 6.846c-.204-1.396-1.145-2.52-2.368-2.736C17.119 3.75 12 3.75 12 3.75s-5.12 0-7.215.36c-1.223.216-2.164 1.34-2.368 2.736C2 8.71 2 12 2 12s0 3.29.417 5.154c.204 1.396 1.145 2.52 2.368 2.736 2.095.36 7.215.36 7.215.36s5.12 0 7.215-.36c1.223-.216 2.164-1.34 2.368-2.736.417-1.864.417-5.154.417-5.154s0-3.29-.417-5.154zM9.996 15.596V8.404L15.811 12l-5.815 3.596z" />
-          </svg>
-          ZYouTube Ayarları
+          <img src="/icons/zyoutube-ai-32.png" width="18" height="18" alt="" />
+          ZYouTube AI Ayarları
         </h1>
         {saveStatus && <span style={{ fontSize: '12px', color: '#22c55e', fontWeight: 600 }}>{saveStatus}</span>}
       </header>
@@ -434,13 +435,13 @@ const Popup = () => {
                   />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Format</label>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Özet token parametresi</label>
                   <select style={selectStyle}
-                    value={draftProvider?.responseMode || 'markdown'}
-                    onChange={e => updateProviderDraft({ responseMode: e.target.value as any })}
+                    value={draftProvider?.summaryTokenParam || 'max_tokens'}
+                    onChange={e => updateProviderDraft({ summaryTokenParam: e.target.value as any })}
                   >
-                    <option value="markdown">Markdown</option>
-                    <option value="json">JSON Object</option>
+                    <option value="max_tokens">max_tokens</option>
+                    <option value="max_completion_tokens">max_completion_tokens</option>
                   </select>
                 </div>
               </div>
@@ -457,21 +458,46 @@ const Popup = () => {
                   />
                 </div>
                 <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Özet çıktı token limiti</label>
+                  <input type="number" style={inputStyle}
+                    value={draftProvider?.maxTokens ?? 4000}
+                    onChange={e => {
+                      const val = parseInt(e.target.value);
+                      updateProviderDraft({ maxTokens: (isNaN(val) || val < 100) ? 4000 : val });
+                    }}
+                    min={100}
+                    max={1000000}
+                    placeholder="4000"
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                <div style={{ flex: 1 }}>
                   <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Düzeltme çıktı token limiti</label>
                   <input type="number" style={inputStyle}
-                    value={draftProvider?.correctionMaxTokens ?? 130000}
+                    value={draftProvider?.correctionMaxTokens ?? 16384}
                     onChange={e => {
                       const val = parseInt(e.target.value);
                       if (isNaN(val)) {
-                        updateProviderDraft({ correctionMaxTokens: 130000 });
+                        updateProviderDraft({ correctionMaxTokens: 16384 });
                       } else {
-                        updateProviderDraft({ correctionMaxTokens: Math.min(1000000, Math.max(1000, val)) });
+                        updateProviderDraft({ correctionMaxTokens: Math.min(65536, Math.max(1000, val)) });
                       }
                     }}
                     min={1000}
-                    max={1000000}
-                    placeholder="130000"
+                    max={65536}
+                    placeholder="16384"
                   />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Düzeltme token parametresi</label>
+                  <select style={selectStyle}
+                    value={draftProvider?.correctionTokenParam || 'max_tokens'}
+                    onChange={e => updateProviderDraft({ correctionTokenParam: e.target.value as any })}
+                  >
+                    <option value="max_tokens">max_tokens</option>
+                    <option value="max_completion_tokens">max_completion_tokens</option>
+                  </select>
                 </div>
               </div>
               <Toggle label="Yalnızca oturum boyunca sakla"
@@ -482,11 +508,47 @@ const Popup = () => {
                 checked={draftProvider?.enableReasoning || false}
                 onChange={v => updateProviderDraft({ enableReasoning: v })}
               />
+              <Toggle label="Özet Streaming"
+                checked={draftProvider?.summaryStreaming === true}
+                onChange={v => updateProviderDraft({ summaryStreaming: v })}
+              />
+              <Toggle label="Özet stream_options"
+                checked={draftProvider?.summaryStreamOptions === true}
+                onChange={v => updateProviderDraft({ summaryStreamOptions: v })}
+              />
+              <Toggle label="Özette JSON Response Format"
+                checked={draftProvider?.summaryJsonMode !== false}
+                onChange={v => updateProviderDraft({ summaryJsonMode: v })}
+              />
+              <Toggle label="Düzeltme Streaming"
+                checked={draftProvider?.correctionStreaming !== false}
+                onChange={v => updateProviderDraft({ correctionStreaming: v })}
+              />
+              <Toggle label="Düzeltme stream_options"
+                checked={draftProvider?.correctionStreamOptions !== false}
+                onChange={v => updateProviderDraft({ correctionStreamOptions: v })}
+              />
+              <Toggle label="Düzeltme Akıl Yürütme"
+                checked={draftProvider?.correctionEnableReasoning === true}
+                onChange={v => updateProviderDraft({ correctionEnableReasoning: v })}
+              />
               <Toggle label="Düzeltmede JSON Response Format (Önerilen)"
                 checked={draftProvider?.correctionJsonMode !== false}
                 onChange={v => updateProviderDraft({ correctionJsonMode: v })}
               />
               
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Bağlantı testi türü</label>
+                <select
+                  style={selectStyle}
+                  value={previewRequestType}
+                  onChange={e => setPreviewRequestType(e.target.value as 'summary' | 'correction')}
+                >
+                  <option value="summary">Özet isteği</option>
+                  <option value="correction">Düzeltme isteği</option>
+                </select>
+              </div>
+
               <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                 <button onClick={() => {
                   if (draftProvider) requestPermissionAndSave(draftProvider);
@@ -591,7 +653,6 @@ const Popup = () => {
                   <div style={{ fontWeight: 700, marginBottom: '4px' }}>{testStatus.message}</div>
                   {testStatus.latency !== undefined && <div><strong>Gecikme:</strong> {testStatus.latency}ms</div>}
                   {testStatus.limits && <div><strong>Limitler:</strong> {testStatus.limits}</div>}
-                  {testStatus.aiResponse && <div style={{ marginTop: '4px', fontStyle: 'italic', opacity: 0.9 }}>AI Yanıtı: "{testStatus.aiResponse}"</div>}
                 </div>
               )}
               
@@ -703,7 +764,9 @@ const Popup = () => {
                     {libraryEntries.length === 0 ? "Kayıt bulunamadı." : "Aramanızla eşleşen kayıt bulunamadı."}
                   </div>
                 ) : !libraryError && (
-                  filtered.map(s => (
+                  filtered.map(s => {
+                    const cardState = getLibraryCardState(s);
+                    return (
                     <div key={s.videoId} style={{ display: 'flex', gap: '10px', padding: '10px', background: 'var(--zy-item-bg, #f3f4f6)', borderRadius: '6px', cursor: 'pointer', transition: 'background 0.2s', border: '1px solid var(--zy-border, #e5e7eb)' }}
                       onClick={(e) => {
                          if ((e.target as HTMLElement).tagName !== 'BUTTON' && (e.target as HTMLElement).tagName !== 'svg' && (e.target as HTMLElement).tagName !== 'path') {
@@ -722,13 +785,13 @@ const Popup = () => {
                         </div>
                         
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                          {s.hasSummary && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#dbeafe', color: '#1e40af', borderRadius: '4px' }}>Özet</span>}
-                          {s.hasCorrectedTranscript && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#dcfce3', color: '#166534', borderRadius: '4px' }}>Düzeltilmiş ({s.correctedTranscript?.sentences?.length || 0})</span>}
-                          {s.hasOriginalTranscript && !s.hasCorrectedTranscript && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#f3f4f6', color: '#374151', borderRadius: '4px' }}>Transkript</span>}
+                          {cardState.showSummaryBadge && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#dbeafe', color: '#1e40af', borderRadius: '4px' }}>Özet</span>}
+                          {cardState.showCorrectionBadge && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#dcfce3', color: '#166534', borderRadius: '4px' }}>Düzeltilmiş ({s.correctedTranscript?.sentences?.length || 0})</span>}
+                          {cardState.showTranscriptBadge && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#f3f4f6', color: '#374151', borderRadius: '4px' }}>Transkript</span>}
                           {s.studyWordCount > 0 && <span style={{ fontSize: '10px', padding: '2px 4px', background: '#fef3c7', color: '#92400e', borderRadius: '4px' }}>{s.studyWordCount} Kelime</span>}
                         </div>
 
-                        {!s.hasSummary && s.hasCorrectedTranscript && (
+                        {cardState.showNoSummary && (
                           <div style={{ fontSize: '10px', color: '#ef4444', fontStyle: 'italic' }}>Özet oluşturulmamış</div>
                         )}
                         
@@ -753,7 +816,8 @@ const Popup = () => {
                         </div>
                       </div>
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>

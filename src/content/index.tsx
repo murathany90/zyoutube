@@ -190,7 +190,12 @@ const Panel = ({ videoId, isInvalidated }: { videoId: string; isInvalidated: boo
             </div>
             <div style={{ display: activeTab === 'transcript' ? 'block' : 'none', height: '100%' }}>
               <ErrorBoundary key={videoId + 'transcript'} componentName="TranscriptTab">
-                <TranscriptTab videoId={videoId} onTranscriptLoaded={setCurrentTranscript} />
+                <TranscriptTab
+                  videoId={videoId}
+                  title={title}
+                  url={url}
+                  onTranscriptLoaded={setCurrentTranscript}
+                />
               </ErrorBoundary>
             </div>
           </div>

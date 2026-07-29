@@ -4,6 +4,14 @@ export class AISettingsService {
   private static STORAGE_KEY = 'ai_summary_settings';
   private static SESSION_PREFIX = 'ai_key_session_';
 
+  private static isUnavailableStorageContextError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return (
+      message.includes('Access to storage is not allowed from this context') ||
+      message.includes('Extension context invalidated')
+    );
+  }
+
   static async getSettings(): Promise<ExtensionSettings> {
     if (typeof chrome === 'undefined' || !chrome.storage) {
       return DEFAULT_SETTINGS;
@@ -49,8 +57,28 @@ export class AISettingsService {
               value.timeoutMs = 180000;
               needsMigrationSave = true;
             }
-            if (value.correctionMaxTokens === 32000 || value.correctionMaxTokens === undefined) {
-              value.correctionMaxTokens = 130000;
+            if ((value.summaryCompatibilityVersion ?? 0) < 1) {
+              value.summaryStreaming = true;
+              value.summaryStreamOptions = true;
+              value.summaryJsonMode = false;
+              value.summaryCompatibilityVersion = 1;
+              needsMigrationSave = true;
+            }
+            if ((value.correctionCompatibilityVersion ?? 0) < 2) {
+              const previousMaxTokens = Number(value.correctionMaxTokens);
+              if (
+                !Number.isFinite(previousMaxTokens) ||
+                previousMaxTokens === 32000 ||
+                previousMaxTokens > 65_536
+              ) {
+                value.correctionMaxTokens = 16_384;
+              }
+              value.correctionCompatibilityVersion = 2;
+              needsMigrationSave = true;
+            }
+            if ((value.correctionCompatibilityVersion ?? 0) < 3) {
+              value.correctionJsonMode = false;
+              value.correctionCompatibilityVersion = 3;
               needsMigrationSave = true;
             }
           }
@@ -82,6 +110,9 @@ export class AISettingsService {
 
       return merged;
     } catch (e) {
+      if (this.isUnavailableStorageContextError(e)) {
+        return DEFAULT_SETTINGS;
+      }
       console.error('Failed to get settings:', e);
       return DEFAULT_SETTINGS;
     }
@@ -105,6 +136,9 @@ export class AISettingsService {
 
       await chrome.storage.local.set({ [this.STORAGE_KEY]: localSettings });
     } catch (e) {
+      if (this.isUnavailableStorageContextError(e)) {
+        return;
+      }
       console.error('Failed to save settings:', e);
       throw e;
     }

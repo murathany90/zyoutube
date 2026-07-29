@@ -51,7 +51,7 @@ test.describe('Aşama 2.2: Gerçek Paket E2E Doğrulaması', () => {
     await popupPage.goto(`chrome-extension://${extensionId}/index.html`);
     
     // Yalnızca ayarlar ve yönetim alanı var. Uzun özet yok.
-    const title = popupPage.locator('h1', { hasText: 'ZYouTube Ayarları' });
+    const title = popupPage.locator('h1', { hasText: 'ZYouTube AI Ayarları' });
     await expect(title).toBeVisible();
 
     await popupPage.close();

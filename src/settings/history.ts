@@ -9,6 +9,17 @@ export interface SavedSummary {
   date: number; // timestamp
   summary?: SummaryResult;
   transcript: TranscriptSegment[];
+  transcriptLanguageCode?: string;
+  transcriptTrackLanguage?: string;
+  transcriptSourceType?: string;
+  transcriptDisplayedLanguage?: 'tr' | 'en' | 'both';
+}
+
+export interface TranscriptHistoryMetadata {
+  languageCode: string;
+  trackLanguage?: string;
+  sourceType?: string;
+  displayedLanguage: 'tr' | 'en' | 'both';
 }
 
 export class HistoryService {
@@ -65,18 +76,21 @@ export class HistoryService {
     transcript: TranscriptSegment[]
   ): Promise<void> {
     const summaries = await this.getSummaries();
-    
-    // Aynı taskId veya videoId varsa güncelle
     const existingIndex = summaries.findIndex(s => s.videoId === videoInfo.videoId);
-    
+    const existing = existingIndex >= 0 ? summaries[existingIndex] : undefined;
+    const savedTranscript = transcript.length > 0
+      ? transcript
+      : existing?.transcript || [];
+
     const newSummary: SavedSummary = {
+      ...existing,
       id: summaryResult.taskId || `task_${Date.now()}`,
       videoId: videoInfo.videoId,
-      title: videoInfo.title,
-      url: videoInfo.url,
+      title: videoInfo.title || existing?.title || 'YouTube Videosu',
+      url: videoInfo.url || existing?.url || `https://www.youtube.com/watch?v=${videoInfo.videoId}`,
       date: Date.now(),
       summary: summaryResult,
-      transcript: transcript
+      transcript: savedTranscript
     };
 
     if (existingIndex >= 0) {
@@ -87,6 +101,54 @@ export class HistoryService {
 
     // Limit the history
     const trimmed = summaries.slice(0, this.MAX_HISTORY);
+
+    return new Promise((resolve) => {
+      chrome.storage.local.set({ [this.STORAGE_KEY]: trimmed }, () => {
+        resolve();
+      });
+    });
+  }
+
+  /**
+   * Görüntülenen orijinal transkripti videoId bazında ekler veya günceller.
+   * Var olan özet ve özet görev kimliği korunur.
+   */
+  static async saveTranscript(
+    videoInfo: { videoId: string; title: string; url: string },
+    transcript: TranscriptSegment[],
+    metadata: TranscriptHistoryMetadata
+  ): Promise<void> {
+    if (transcript.length === 0) return;
+
+    const summaries = await this.getSummaries();
+    const existingIndex = summaries.findIndex(
+      summary => summary.videoId === videoInfo.videoId
+    );
+    const existing = existingIndex >= 0 ? summaries[existingIndex] : undefined;
+
+    const record: SavedSummary = {
+      ...existing,
+      id: existing?.id || `transcript_${videoInfo.videoId}`,
+      videoId: videoInfo.videoId,
+      title: videoInfo.title || existing?.title || 'YouTube Videosu',
+      url: videoInfo.url || existing?.url || `https://www.youtube.com/watch?v=${videoInfo.videoId}`,
+      date: Date.now(),
+      transcript,
+      transcriptLanguageCode: metadata.languageCode,
+      transcriptTrackLanguage: metadata.trackLanguage,
+      transcriptSourceType: metadata.sourceType,
+      transcriptDisplayedLanguage: metadata.displayedLanguage
+    };
+
+    if (existingIndex >= 0) {
+      summaries[existingIndex] = record;
+    } else {
+      summaries.unshift(record);
+    }
+
+    const trimmed = summaries
+      .sort((a, b) => b.date - a.date)
+      .slice(0, this.MAX_HISTORY);
 
     return new Promise((resolve) => {
       chrome.storage.local.set({ [this.STORAGE_KEY]: trimmed }, () => {

@@ -530,4 +530,191 @@ describe('api-worker SSE and HTTP logic', () => {
     ).not.toContain('TEST_SECRET_DO_NOT_LEAK_67890');
     consoleLogSpy.mockRestore();
   });
+
+  it('12. summary streaming request ayarları kullanılır ve SSE ayrıştırılır', async () => {
+    const summaryJson = JSON.stringify({
+      summary: { tr: 'Test özeti' },
+      keyIdeas: [],
+      sections: [],
+      actionItems: [],
+      importantTerms: [],
+      warnings: []
+    });
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: createMockStream([
+        `data:${JSON.stringify({
+          choices: [{ delta: { content: summaryJson } }]
+        })}\n\n`,
+        'data: [DONE]\n\n'
+      ])
+    });
+
+    messageListener(
+      {
+        type: 'API_SUMMARY_START',
+        taskId: 'task-sum-stream',
+        videoId: 'video-1',
+        request: {
+          taskId: 'task-sum-stream',
+          transcript: { segments: [] },
+          options: { outputLanguage: 'tr', length: 'short' },
+          video: { videoId: 'video-1', title: 'Test Video' }
+        },
+        config: {
+          id: 'openai-compatible',
+          baseUrl: 'http://test',
+          apiKey: 'key',
+          model: 'test-model',
+          maxTokens: 2048,
+          summaryTokenParam: 'max_completion_tokens',
+          summaryStreaming: true,
+          summaryStreamOptions: true,
+          summaryJsonMode: true
+        }
+      },
+      {},
+      vi.fn()
+    );
+    await vi.runAllTimersAsync();
+
+    const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(requestBody.max_completion_tokens).toBe(2048);
+    expect(requestBody.stream).toBe(true);
+    expect(requestBody.stream_options).toEqual({ include_usage: true });
+    expect(requestBody.response_format).toEqual({ type: 'json_object' });
+    expect(
+      chromeMock.runtime.sendMessage.mock.calls.some(
+        (call: any) => call[0].type === 'API_SUMMARY_COMPLETED'
+      )
+    ).toBe(true);
+  });
+
+  it('13. summary reasoning_content final cevap olarak kullanılmaz', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: '',
+          reasoning_content: 'Private reasoning'
+        },
+        finish_reason: 'stop'
+      }]
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    }));
+
+    messageListener(
+      {
+        type: 'API_SUMMARY_START',
+        taskId: 'task-sum-reasoning',
+        videoId: 'video-1',
+        request: {
+          taskId: 'task-sum-reasoning',
+          transcript: { segments: [] },
+          options: { outputLanguage: 'tr', length: 'short' },
+          video: { videoId: 'video-1', title: 'Test Video' }
+        },
+        config: {
+          id: 'openai-compatible',
+          baseUrl: 'http://test',
+          apiKey: 'key',
+          model: 'test-model',
+          summaryStreaming: false
+        }
+      },
+      {},
+      vi.fn()
+    );
+    await vi.runAllTimersAsync();
+
+    const failedCall = chromeMock.runtime.sendMessage.mock.calls.find(
+      (call: any) => call[0].type === 'API_SUMMARY_FAILED'
+    );
+    expect(failedCall?.[0].error.code).toBe('SUMMARY_FINAL_CONTENT_MISSING');
+    expect(
+      chromeMock.runtime.sendMessage.mock.calls.some(
+        (call: any) => call[0].type === 'API_SUMMARY_COMPLETED'
+      )
+    ).toBe(false);
+  });
+
+  it('14. uzun duzeltmeyi parcalara ayirip tek sonuc olarak birlestirir', async () => {
+    const chunkContents = [
+      JSON.stringify({
+        sentences: [{
+          from: 0,
+          to: 39,
+          tr: 'Birinci parca.',
+          en: 'First chunk.'
+        }]
+      }),
+      JSON.stringify({
+        sentences: [{
+          from: 0,
+          to: 0,
+          tr: 'Ikinci parca.',
+          en: 'Second chunk.'
+        }]
+      })
+    ];
+
+    fetchMock.mockImplementation(() => {
+      const content = chunkContents.shift();
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'text/event-stream' }),
+        body: createMockStream([
+          `data: {"choices":[{"delta":{"content":${JSON.stringify(content)}},"finish_reason":"stop"}]}\n\n`
+        ])
+      });
+    });
+
+    messageListener(
+      {
+        type: 'API_CORRECTION_START',
+        taskId: 'task-chunked',
+        videoId: 'video-1',
+        request: {
+          transcript: {
+            sourceLanguage: 'tr',
+            segments: Array.from({ length: 41 }, (_, index) => ({
+              id: `segment-${index}`,
+              startTimeMs: index * 1000,
+              endTimeMs: (index + 1) * 1000,
+              turkish: `metin ${index}`,
+              english: ''
+            }))
+          },
+          options: {},
+          video: { title: 'Test Video' }
+        },
+        config: {
+          baseUrl: 'http://test',
+          apiKey: 'key',
+          model: 'test-model',
+          correctionStreaming: true
+        }
+      },
+      {},
+      vi.fn()
+    );
+    await vi.runAllTimersAsync();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const completedCall = chromeMock.runtime.sendMessage.mock.calls.find(
+      (call: any) => call[0].type === 'API_CORRECTION_COMPLETED'
+    );
+    expect(completedCall).toBeDefined();
+    expect(
+      completedCall![0].result.sentences.flatMap(
+        (sentence: any) => sentence.sourceSegmentIds
+      )
+    ).toEqual(
+      Array.from({ length: 41 }, (_, index) => `segment-${index}`)
+    );
+  });
 });

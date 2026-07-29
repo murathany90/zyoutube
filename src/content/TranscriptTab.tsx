@@ -5,6 +5,8 @@ import { CORRECTION_SAVE_FAILED_MESSAGE } from './correction-ui-messages';
 import { CorrectedBilingualSentence } from '../settings/types';
 import { sendRuntimeMessage } from './runtime-messenger';
 import { WordDictionaryPopup } from './components/WordDictionaryPopup';
+import { persistDisplayedTranscript } from './transcript-history';
+import { prepareCorrectionInput } from './correction-input';
 
 const ENABLE_DICTIONARY_POPUP = true;
 
@@ -86,7 +88,19 @@ const HighlightedText = ({
   }
 };
 
-export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string, onTranscriptLoaded?: (result: TranscriptResult | null) => void }) => {
+interface TranscriptTabProps {
+  videoId: string;
+  title: string;
+  url: string;
+  onTranscriptLoaded?: (result: TranscriptResult | null) => void;
+}
+
+export const TranscriptTab = ({
+  videoId,
+  title,
+  url,
+  onTranscriptLoaded
+}: TranscriptTabProps) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -452,6 +466,15 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
             setResult(res);
             console.log(`[Transcript] result committed`);
             if (onTranscriptLoaded) onTranscriptLoaded(res);
+            persistDisplayedTranscript({
+              videoId,
+              title,
+              url,
+              result: res,
+              displayedLanguage: displayLanguage
+            }).catch(error => {
+              console.error('[Transcript] history persistence failed', error);
+            });
         }
       } catch (err: any) {
         if (err.name === 'AbortError') return;
@@ -472,7 +495,7 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       active = false;
       if (abortControllerRef.current) abortControllerRef.current.abort();
     };
-  }, [selectedTrackUrl, videoId, tracks, displayLanguage, reloadCounter]);
+  }, [selectedTrackUrl, videoId, title, url, tracks, displayLanguage, reloadCounter]);
 
   // 3. Track video time
   useEffect(() => {
@@ -635,31 +658,16 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
 
       const title = document.querySelector('title')?.textContent?.replace('- YouTube', '').trim() || 'Video';
       
-      const isTurkishSource = sourceLang.startsWith('tr');
-      const mappedSegments = segments.map(s => {
-        const trText = isTurkishSource ? s.cleanText : s.secondaryText || '';
-        const enText = isTurkishSource ? s.secondaryText || '' : s.cleanText;
-        return {
-          id: s.id,
-          startTimeMs: s.startTimeMs,
-          endTimeMs: s.endTimeMs,
-          turkish: trText,
-          english: enText
-        };
-      });
-
-      let emptyTurkishSegmentCount = 0;
-      let emptyEnglishSegmentCount = 0;
-      let turkishCharacterCount = 0;
-      let englishCharacterCount = 0;
-
-      for (const seg of mappedSegments) {
-        if (!seg.turkish || seg.turkish.trim() === '') emptyTurkishSegmentCount++;
-        else turkishCharacterCount += seg.turkish.length;
-
-        if (!seg.english || seg.english.trim() === '') emptyEnglishSegmentCount++;
-        else englishCharacterCount += seg.english.length;
-      }
+      const correctionInput = prepareCorrectionInput(segments, sourceLang);
+      const {
+        isTurkishSource,
+        mappedSegments,
+        emptyTurkishSegmentCount,
+        emptyEnglishSegmentCount,
+        turkishCharacterCount,
+        englishCharacterCount,
+        sourceCharacterCount
+      } = correctionInput;
 
       const segmentCount = mappedSegments.length;
       const englishCoverageRatio = segmentCount > 0 ? ((segmentCount - emptyEnglishSegmentCount) / segmentCount) : 0;
@@ -674,8 +682,8 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
         englishCoverageRatio
       });
 
-      if (englishCharacterCount === 0) {
-        finishCorrectionWithError('İngilizce transkript içeriği bulunamadığı için düzeltme başlatılamadı.');
+      if (sourceCharacterCount === 0) {
+        finishCorrectionWithError('Kaynak transkript içeriği bulunamadığı için düzeltme başlatılamadı.');
         return;
       }
 
@@ -719,13 +727,6 @@ export const TranscriptTab = ({ videoId, onTranscriptLoaded }: { videoId: string
       if (!window.confirm('Zaten düzeltilmiş bir transkriptiniz var. Yeniden düzeltmek istediğinize emin misiniz?')) {
         return;
       }
-    }
-    
-    const hasSecondaryAnywhere = result?.segments.some(s => s.secondaryText && s.secondaryText.trim() !== '');
-    if (!hasSecondaryAnywhere) {
-      setDisplayLanguage('both');
-      setPendingCorrection(true);
-      return;
     }
     
     if (result && result.segments.length > 0) {

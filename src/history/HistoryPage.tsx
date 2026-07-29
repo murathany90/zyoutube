@@ -5,6 +5,12 @@ import { formatTime } from '../utils/formatters';
 import { DictionaryDB } from '../dictionary/dictionary-db';
 import { WordDictionaryPopup } from '../content/components/WordDictionaryPopup';
 import { highlightSearchText, searchInTranscripts } from './history-helpers';
+import {
+  getHistoryInitialTab,
+  getOriginalTranscriptData,
+  shouldShowSummaryEmptyState,
+  type HistoryTab
+} from './history-view-model';
 import './history.css';
 
 export const HistoryPage = () => {
@@ -12,7 +18,7 @@ export const HistoryPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'summary' | 'transcript' | 'corrected' | 'words'>('summary');
+  const [activeTab, setActiveTab] = useState<HistoryTab>('summary');
   
   // Summary Language Tabs
   const [summaryLanguageMode, setSummaryLanguageMode] = useState<'tr' | 'en' | 'side-by-side'>('tr');
@@ -30,14 +36,7 @@ export const HistoryPage = () => {
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(-1);
   const resultRefs = useRef<{ [key: number]: HTMLDivElement | null }>({});
 
-  useEffect(() => {
-    const hash = window.location.hash.replace('#', '');
-    if (['summary', 'transcript', 'corrected', 'words'].includes(hash)) {
-      setActiveTab(hash as any);
-    }
-  }, []);
-
-  const handleTabChange = (tab: 'summary' | 'transcript' | 'corrected' | 'words') => {
+  const handleTabChange = (tab: HistoryTab) => {
     setActiveTab(tab);
     window.location.hash = tab;
     
@@ -79,6 +78,7 @@ export const HistoryPage = () => {
       
       if (foundEntry) {
         setEntry(foundEntry);
+        setActiveTab(getHistoryInitialTab(foundEntry, window.location.hash));
         
         const hasTr = !!foundEntry.savedSummary?.summary?.summary?.tr;
         const hasEn = !!foundEntry.savedSummary?.summary?.summary?.en;
@@ -88,12 +88,6 @@ export const HistoryPage = () => {
           setSummaryLanguageMode('en');
         }
         
-        // Auto-select tab if summary doesn't exist
-        if (!foundEntry.hasSummary && !window.location.hash) {
-          if (foundEntry.hasCorrectedTranscript) setActiveTab('corrected');
-          else if (foundEntry.hasOriginalTranscript) setActiveTab('transcript');
-          else if (foundEntry.hasStudyWords) setActiveTab('words');
-        }
       } else {
         setError('Kayıt bulunamadı.');
       }
@@ -141,7 +135,7 @@ export const HistoryPage = () => {
         if (transcriptLanguageFilter === 'all' || transcriptLanguageFilter === 'en') fieldsToSearch.push('correctedEnglish');
         matchedIndices = searchInTranscripts(entry.correctedTranscript.sentences, query, fieldsToSearch).map(m => m.index);
       } else if (activeTab === 'transcript') {
-        const sourceData = getOriginalTranscriptData();
+        const sourceData = getOriginalTranscriptData(entry);
         if (transcriptLanguageFilter === 'all' || transcriptLanguageFilter === 'tr') fieldsToSearch.push('text', 'originalTurkish');
         if (transcriptLanguageFilter === 'all' || transcriptLanguageFilter === 'en') fieldsToSearch.push('secondaryText', 'originalEnglish');
         matchedIndices = searchInTranscripts(sourceData, query, fieldsToSearch).map(m => m.index);
@@ -295,25 +289,6 @@ export const HistoryPage = () => {
     });
   };
 
-  const getOriginalTranscriptData = () => {
-    if (entry?.savedSummary?.transcript && entry.savedSummary.transcript.length > 0) {
-      return entry.savedSummary.transcript;
-    }
-    
-    if (entry?.correctedTranscript?.sentences) {
-      return entry.correctedTranscript.sentences
-        .filter((s: any) => s.originalTurkish || s.originalEnglish)
-        .map((s: any) => ({
-          id: s.id,
-          startTimeMs: s.startTimeMs,
-          text: s.originalTurkish,
-          secondaryText: s.originalEnglish
-        }));
-    }
-    
-    return [];
-  };
-
   if (loading) {
     return <div style={{ padding: '40px', textAlign: 'center' }}>Yükleniyor...</div>;
   }
@@ -331,7 +306,7 @@ export const HistoryPage = () => {
   const hasTr = !!savedSummary?.summary?.summary?.tr;
   const hasEn = !!savedSummary?.summary?.summary?.en;
 
-  const originalTranscriptData = getOriginalTranscriptData();
+  const originalTranscriptData = getOriginalTranscriptData(entry);
 
   return (
     <div className="zy-history-container">
@@ -350,7 +325,7 @@ export const HistoryPage = () => {
       </div>
 
       <div className="zy-history-tabs">
-        <button className={`zy-history-tab ${activeTab === 'summary' ? 'active' : ''}`} onClick={() => handleTabChange('summary')} disabled={!entry.hasSummary}>
+        <button className={`zy-history-tab ${activeTab === 'summary' ? 'active' : ''}`} onClick={() => handleTabChange('summary')}>
           Özet Detayı
         </button>
         {entry.hasCorrectedTranscript && (
@@ -372,7 +347,7 @@ export const HistoryPage = () => {
 
       <div className="zy-history-content">
         <div className="zy-history-scroll-area">
-          {activeTab === 'summary' && !entry.hasSummary && (
+          {shouldShowSummaryEmptyState(entry, activeTab) && (
              <div style={{ color: '#6b7280', fontSize: '14px', textAlign: 'center', padding: '40px' }}>
                Bu video için özet oluşturulmamış.
              </div>

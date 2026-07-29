@@ -56,7 +56,7 @@ test.describe('Privacy and Security Validation', () => {
   test('API key should never be leaked in DOM, Console or IndexedDB', async () => {
     // 1. Setup - Open popup and set API key
     await page.goto(`chrome-extension://${extensionId}/index.html`);
-    await page.waitForSelector('text=ZYouTube Ayarları');
+    await page.waitForSelector('text=ZYouTube AI Ayarları');
     
     // Choose API tab and enter API key
     await page.locator('button:has-text("API")').click();

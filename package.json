@@ -1,5 +1,5 @@
 {
-  "name": "youtube-ai-summary-extension",
+  "name": "zyoutube-ai",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "clean:dist": "node scripts/clean-dist.mjs",
+    "icons:generate": "node scripts/generate-icons.mjs",
     "build:clean": "npm run clean:dist && npm run build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
@@ -15,7 +16,9 @@
     "test:fixture": "playwright test tests/e2e.spec.ts",
     "test:extension": "npm run build:clean && playwright test tests/extension.spec.ts",
     "test:privacy": "playwright test tests/privacy/privacy.spec.ts",
-    "test:live-correction": "npm run build:clean && playwright test tests/live-correction.spec.ts --timeout 300000",
+    "test:live-correction": "npm run build:clean && playwright test tests/live-correction.spec.ts --timeout 420000",
+    "test:live-summary": "npm run build:clean && playwright test tests/live-summary.spec.ts --timeout 420000",
+    "test:live-gemini": "npm run build:clean && playwright test tests/live-gemini.spec.ts --timeout 420000",
     "test:live-transcript": "playwright test tests/live-transcript.spec.ts --timeout 300000",
     "test:live-panel-smoke": "playwright test tests/live-panel-smoke.spec.ts --timeout 120000",
     "test": "npm run typecheck && npm run test:unit && npm run test:providers && npm run test:privacy && npm run test:fixture && npm run test:extension"

@@ -131,6 +131,46 @@ describe('CorrectionResponseParser', () => {
     });
   });
 
+    it('tek bir ust seviye cumle nesnesini kabul eder', () => {
+      const json = JSON.stringify({
+        from: 0,
+        to: 0,
+        tr: 'Merhaba',
+        en: 'Hello'
+      });
+
+      const res = CorrectionResponseParser.parse(json);
+
+      expect(res).toHaveLength(1);
+      expect(res[0].correctedTurkish).toBe('Merhaba');
+    });
+
+    it('art arda gelen ust seviye cumle nesnelerini kabul eder', () => {
+      const raw = [
+        JSON.stringify({ from: 0, to: 1, tr: 'Bir', en: 'One' }),
+        JSON.stringify({ from: 2, to: 2, tr: 'Iki', en: 'Two' })
+      ].join('\n');
+
+      const res = CorrectionResponseParser.parse(raw);
+
+      expect(res).toHaveLength(2);
+      expect(res.map(sentence => sentence.correctedTurkish))
+        .toEqual(['Bir', 'Iki']);
+    });
+
+    it('parse hatasi yanit govdesini hata metnine eklemez', () => {
+      const sensitiveBody = 'SENSITIVE_TRANSCRIPT_BODY';
+
+      expect(() => CorrectionResponseParser.parse(sensitiveBody))
+        .toThrow(/JSON olarak/);
+      try {
+        CorrectionResponseParser.parse(sensitiveBody);
+      } catch (error: any) {
+        expect(error.message).not.toContain(sensitiveBody);
+        expect(error.message).not.toContain('YanÄ±t Ã¶nizlemesi');
+      }
+    });
+
   describe('enrichCorrectedSentences', () => {
     it('başarılı eşleştirme', () => {
       const sentences = [
@@ -208,6 +248,94 @@ describe('CorrectionResponseParser', () => {
 
       expect(enriched[0].warnings).toContain('1. cümlede yapay zekâ İngilizce çıktı üretmedi; orijinal İngilizce metin kullanıldı.');
       expect(enriched[0].warnings?.join(' ')).not.toContain('NaN');
+    });
+
+    it('son cumledeki tek adimlik to tasmasini normalize eder', () => {
+      const parsed = CorrectionResponseParser.parse(JSON.stringify({
+        sentences: [
+          { from: 0, to: 3, tr: 'A B C', en: 'A B C' }
+        ]
+      }));
+
+      const enriched = CorrectionResponseParser.enrichCorrectedSentences(
+        parsed,
+        dummySegments,
+        'tr'
+      );
+
+      expect(enriched[0].sourceSegmentIds)
+        .toEqual(['seg-1', 'seg-2', 'seg-3']);
+      expect(enriched[0].endTimeMs).toBe(3000);
+    });
+
+    it('son cumledeki daha buyuk to tasmasini da normalize eder', () => {
+      const parsed = CorrectionResponseParser.parse(JSON.stringify({
+        sentences: [
+          { from: 0, to: 4, tr: 'A B C', en: 'A B C' }
+        ]
+      }));
+
+      const enriched = CorrectionResponseParser.enrichCorrectedSentences(
+        parsed,
+        dummySegments,
+        'tr'
+      );
+
+      expect(enriched[0].sourceSegmentIds)
+        .toEqual(['seg-1', 'seg-2', 'seg-3']);
+    });
+
+    it('ara cumlenin to degerini sonraki from sinirindan turetir', () => {
+      const parsed = CorrectionResponseParser.parse(JSON.stringify({
+        sentences: [
+          { from: 0, to: 4, tr: 'A B', en: 'A B' },
+          { from: 2, to: 2, tr: 'C', en: 'C' }
+        ]
+      }));
+
+      const enriched = CorrectionResponseParser.enrichCorrectedSentences(
+        parsed,
+        dummySegments,
+        'tr'
+      );
+
+      expect(enriched[0].sourceSegmentIds).toEqual(['seg-1', 'seg-2']);
+      expect(enriched[1].sourceSegmentIds).toEqual(['seg-3']);
+    });
+
+    it('sondaki parca disi from degerini yok sayar', () => {
+      const parsed = CorrectionResponseParser.parse(JSON.stringify({
+        sentences: [
+          { from: 0, to: 2, tr: 'A B C', en: 'A B C' },
+          { from: 3, to: 3, tr: 'Fazla', en: 'Extra' }
+        ]
+      }));
+
+      const enriched = CorrectionResponseParser.enrichCorrectedSentences(
+        parsed,
+        dummySegments,
+        'tr'
+      );
+
+      expect(enriched).toHaveLength(1);
+      expect(enriched[0].sourceSegmentIds)
+        .toEqual(['seg-1', 'seg-2', 'seg-3']);
+    });
+
+    it('parca disi cumleden sonra gecerli indeks gelirse reddeder', () => {
+      const parsed = CorrectionResponseParser.parse(JSON.stringify({
+        sentences: [
+          { from: 0, to: 0, tr: 'A', en: 'A' },
+          { from: 3, to: 3, tr: 'Fazla', en: 'Extra' },
+          { from: 2, to: 2, tr: 'C', en: 'C' }
+        ]
+      }));
+
+      expect(() => CorrectionResponseParser.enrichCorrectedSentences(
+        parsed,
+        dummySegments,
+        'tr'
+      )).toThrow(/Parça dışı cümleden sonra/);
     });
   });
 });

@@ -114,6 +114,54 @@ describe('readCorrectionResponse', () => {
     expect(result.metrics.sseEventCount).toBe(2);
   });
 
+  it('kümülatif message.content anlık görüntülerini tekrar tekrar eklemez', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          'data: {"choices":[{"message":{"content":"{\\"sentences\\":"}}]}\n\n' +
+          'data: {"choices":[{"message":{"content":"{\\"sentences\\":[]}"}}]}\n\n' +
+          'data: {"choices":[{"message":{"content":"{\\"sentences\\":[]}"},"finish_reason":"stop"}]}\n\n'
+        ));
+      }
+    });
+
+    const result = await readCorrectionResponse(
+      responseFromStream(stream),
+      {
+        expectedStreaming: true,
+        firstByteTimeoutMs: 50,
+        streamIdleTimeoutMs: 50
+      }
+    );
+
+    expect(result.content).toBe('{"sentences":[]}');
+    expect(result.metrics.contentCharacters).toBe(16);
+  });
+
+  it('önek biçimi değişen message.content snapshotlarını üst üste eklemez', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          'data: {"choices":[{"message":{"content":"{\\"sentences\\":"}}]}\n\n' +
+          'data: {"choices":[{"message":{"content":"\\n{\\"sentences\\":["}}]}\n\n' +
+          'data: {"choices":[{"message":{"content":"\\n{\\"sentences\\":[]}"},"finish_reason":"stop"}]}\n\n'
+        ));
+      }
+    });
+
+    const result = await readCorrectionResponse(
+      responseFromStream(stream),
+      {
+        expectedStreaming: true,
+        firstByteTimeoutMs: 50,
+        streamIdleTimeoutMs: 50
+      }
+    );
+
+    expect(result.content).toBe('\n{"sentences":[]}');
+    expect(result.metrics.contentCharacters).toBe(17);
+  });
+
   it('[DONE] akışı sonlandırır ve reasoning final içeriğe karışmaz', async () => {
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {

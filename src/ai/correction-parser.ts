@@ -56,6 +56,68 @@ export class CorrectionResponseParser {
     }
   }
 
+  private static extractBalancedJsonValues(text: string): any[] {
+    const values: any[] = [];
+
+    for (let startIndex = 0; startIndex < text.length; startIndex++) {
+      const startChar = text[startIndex];
+      if (startChar !== '{' && startChar !== '[') continue;
+
+      const stack: string[] = [];
+      let inString = false;
+      let escaped = false;
+
+      for (let index = startIndex; index < text.length; index++) {
+        const char = text[index];
+
+        if (inString) {
+          if (char === '\\' && !escaped) {
+            escaped = true;
+            continue;
+          }
+          if (char === '"' && !escaped) inString = false;
+          escaped = false;
+          continue;
+        }
+
+        if (char === '"') {
+          inString = true;
+          continue;
+        }
+        if (char === '{') stack.push('}');
+        else if (char === '[') stack.push(']');
+        else if (char === '}' || char === ']') {
+          if (stack.pop() !== char) break;
+          if (stack.length === 0) {
+            try {
+              values.push(JSON.parse(text.slice(startIndex, index + 1)));
+              startIndex = index;
+            } catch {
+              // Keep scanning for the next balanced JSON value.
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    return values;
+  }
+
+  private static isSentenceLike(value: any): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return false;
+    }
+
+    return (
+      (
+        typeof value.from === 'number' &&
+        typeof value.to === 'number'
+      ) ||
+      Array.isArray(value.sourceSegmentIds)
+    );
+  }
+
   static parse(jsonStr: string, finishReason?: string): CorrectedBilingualSentence[] {
     let data: any = null;
 
@@ -84,34 +146,46 @@ export class CorrectionResponseParser {
 
     // 4. Dengeli Object veya Array çıkarma (string-aware)
     if (!data) {
-      const objStart = jsonStr.indexOf('{');
-      const arrStart = jsonStr.indexOf('[');
-      
-      let extractTarget: string | null = null;
-      if (objStart !== -1 && (arrStart === -1 || objStart < arrStart)) {
-        extractTarget = this.extractBalancedJson(jsonStr, '{');
-      } else if (arrStart !== -1) {
-        extractTarget = this.extractBalancedJson(jsonStr, '[');
+      const extractedValues = this.extractBalancedJsonValues(jsonStr);
+      if (
+        extractedValues.length > 0 &&
+        extractedValues.every(value => this.isSentenceLike(value))
+      ) {
+        data = { sentences: extractedValues };
+      } else if (extractedValues.length === 1) {
+        data = extractedValues[0];
       }
-      
-      if (extractTarget) {
-        try { data = JSON.parse(extractTarget); } catch (e) { /* ignore */ }
+
+      if (!data) {
+        const objStart = jsonStr.indexOf('{');
+        const arrStart = jsonStr.indexOf('[');
+
+        let extractTarget: string | null = null;
+        if (objStart !== -1 && (arrStart === -1 || objStart < arrStart)) {
+          extractTarget = this.extractBalancedJson(jsonStr, '{');
+        } else if (arrStart !== -1) {
+          extractTarget = this.extractBalancedJson(jsonStr, '[');
+        }
+
+        if (extractTarget) {
+          try { data = JSON.parse(extractTarget); } catch (e) { /* ignore */ }
+        }
       }
     }
 
     if (!data) {
-      const safePreview = jsonStr.substring(0, 300).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      throw new Error(`Düzeltme sonucu JSON olarak ayrıştırılamadı.\nYanıt tipi: string\nFinish reason: ${finishReason || 'bilinmiyor'}\nYanıt önizlemesi: ${safePreview}`);
+      throw new Error(`Düzeltme sonucu JSON olarak ayrıştırılamadı.\nYanıt tipi: string\nFinish reason: ${finishReason || 'bilinmiyor'}`);
     }
     
     // Eğer array ise sarmala
     if (Array.isArray(data)) {
       data = { sentences: data };
+    } else if (this.isSentenceLike(data)) {
+      data = { sentences: [data] };
     }
 
     if (!data.sentences || !Array.isArray(data.sentences)) {
-      const safePreview = JSON.stringify(data).substring(0, 300).replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      throw new Error(`API yanıtında sentences dizisi bulunamadı.\nYanıt tipi: object\nFinish reason: ${finishReason || 'bilinmiyor'}\nYanıt önizlemesi: ${safePreview}`);
+      throw new Error(`API yanıtında sentences dizisi bulunamadı.\nYanıt tipi: object\nFinish reason: ${finishReason || 'bilinmiyor'}`);
     }
 
     try {
@@ -194,11 +268,50 @@ export class CorrectionResponseParser {
     // Create segment map for fast lookup
     const segmentMap = new Map(sourceSegments.map((s, idx) => [s.id, { ...s, index: idx }]));
 
-    const enriched = apiSentences.map((sentenceAny: any) => {
+    const firstOutOfRangeIndex = apiSentences.findIndex(
+      (sentence: any) =>
+        typeof sentence?._from === 'number' &&
+        sentence._from >= sourceSegments.length
+    );
+    if (
+      firstOutOfRangeIndex >= 0 &&
+      apiSentences.slice(firstOutOfRangeIndex + 1).some(
+        (sentence: any) =>
+          typeof sentence?._from !== 'number' ||
+          sentence._from < sourceSegments.length
+      )
+    ) {
+      throw new Error('Parça dışı cümleden sonra geçerli segment bulundu.');
+    }
+    const boundedApiSentences = firstOutOfRangeIndex >= 0
+      ? apiSentences.slice(0, firstOutOfRangeIndex)
+      : apiSentences;
+    if (boundedApiSentences.length === 0) {
+      throw new Error('Düzeltme sonucu geçerli segment içermiyor.');
+    }
+
+    const enriched = boundedApiSentences.map((sentenceAny: any, apiSentenceIndex) => {
       const sentence = sentenceAny as CorrectedBilingualSentence & { _from?: number; _to?: number; index?: number };
       const sentenceNumber = typeof sentence.index === 'number' ? sentence.index + 1 : lastSegmentIndex + 2;
       
       if (typeof sentence._from === 'number' && typeof sentence._to === 'number') {
+        const nextSentence = boundedApiSentences[apiSentenceIndex + 1] as
+          | (CorrectedBilingualSentence & { _from?: number })
+          | undefined;
+        if (typeof nextSentence?._from === 'number') {
+          if (
+            nextSentence._from <= sentence._from ||
+            nextSentence._from >= sourceSegments.length
+          ) {
+            throw new Error(
+              `Geçersiz sonraki from değeri: ${nextSentence._from}`
+            );
+          }
+          sentence._to = nextSentence._from - 1;
+        } else if (apiSentenceIndex === boundedApiSentences.length - 1) {
+          sentence._to = sourceSegments.length - 1;
+        }
+
         if (sentence._from !== lastSegmentIndex + 1) {
            throw new Error(`Cümlelerin arası kopuk veya sırası bozuk. Beklenen from: ${lastSegmentIndex + 1}, Gelen: ${sentence._from}`);
         }

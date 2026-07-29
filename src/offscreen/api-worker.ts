@@ -8,6 +8,10 @@ import {
   type CorrectionReadMetrics,
   type CorrectionTimeoutKind
 } from './correction-response-reader';
+import {
+  mapWithConcurrency,
+  splitCorrectionRequest
+} from './correction-chunking';
 
 
 export type NormalizedCorrectionError = {
@@ -184,6 +188,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'API_SUMMARY_CANCEL') {
     const task = activeTasks.get(message.taskId);
     if (task) {
+      task.userCancelled = true;
       task.controller.abort(new Error('AbortError'));
       // Clean up happens in the finally block of handleApiSummaryStart
     }
@@ -225,16 +230,21 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
   }, 15000);
 
   const timeoutMs = config.timeoutMs ?? 180000;
-  const timeoutId = window.setTimeout(() => {
-    controller.abort(new Error('Timeout'));
-  }, timeoutMs);
-
-  activeTasks.set(taskId, {
+  const taskContext: TaskContext = {
     controller,
     heartbeatId,
-    timeoutId,
-    startedAt
-  });
+    timeoutId: 0,
+    startedAt,
+    timedOut: false,
+    userCancelled: false
+  };
+  taskContext.timeoutId = window.setTimeout(() => {
+    taskContext.timedOut = true;
+    taskContext.timeoutKind = 'total';
+    controller.abort(new Error('Summary total timeout'));
+  }, timeoutMs);
+
+  activeTasks.set(taskId, taskContext);
   
   // 4. Offscreen kabul onayı
   chrome.runtime.sendMessage({ type: 'API_SUMMARY_ACCEPTED', taskId }).catch(console.error);
@@ -284,37 +294,69 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
       throw err;
     }
 
-    let aiResponseText = '';
-    let usage: any = undefined;
-    
+    let readResult;
     try {
-      const data = await response.json();
-      if (!data.choices || !data.choices[0]) {
-         throw new Error("Geçersiz API yanıtı (choices dizisi boş).");
+      readResult = await readCorrectionResponse(response, {
+        expectedStreaming: Boolean(body.stream),
+        firstByteTimeoutMs: config.summaryFirstByteTimeoutMs ?? 60000,
+        streamIdleTimeoutMs: config.summaryStreamIdleTimeoutMs ?? 45000,
+        requestStartedAtMs: fetchStart,
+        onProgress: (metrics) => {
+          chrome.runtime.sendMessage({
+            type: 'SUMMARY_PROGRESS',
+            taskId,
+            videoId,
+            status: 'summarizing',
+            message: `Yanıt alınıyor... ${metrics.receivedCharacters} karakter`
+          }).catch(console.error);
+        }
+      });
+    } catch (error) {
+      if (error instanceof CorrectionResponseTimeoutError) {
+        taskContext.timedOut = true;
+        taskContext.timeoutKind = error.timeoutKind;
+        if (!controller.signal.aborted) controller.abort(error);
       }
-      
-      const messageObj = data.choices[0].message;
-      if (!messageObj) {
-         throw new Error("Geçersiz API yanıtı (message nesnesi eksik).");
-      }
-      
-      aiResponseText = messageObj.content || '';
-      
-      if (!aiResponseText || aiResponseText.trim() === '') {
-        aiResponseText = messageObj.reasoning_content || '';
-      }
-      
-      if (!aiResponseText || aiResponseText.trim() === '') {
-        throw new Error("EMPTY_API_RESPONSE: API yanıtı içerik veya düşünme (reasoning) verisi barındırmıyor.");
-      }
-      
-      if (data.choices[0].finish_reason === 'content_filter') {
-         throw new Error("İçerik filtrelemesi nedeniyle yanıt alınamadı.");
-      }
-      
-      usage = data.usage;
-    } catch (e: any) {
-       throw new Error(e.message || "JSON yanıtı işlenemedi.");
+      throw error;
+    }
+
+    const aiResponseText = readResult.content;
+    console.log(
+      `[API Task] summary response metrics: ` +
+      `status=${response.status}, contentType=${readResult.metrics.contentType}, ` +
+      `firstByteMs=${readResult.metrics.firstByteMs ?? 'none'}, ` +
+      `chunks=${readResult.metrics.chunkCount}, ` +
+      `bytes=${readResult.metrics.receivedBytes}, ` +
+      `characters=${readResult.metrics.receivedCharacters}, ` +
+      `lastSseEventAtMs=${readResult.metrics.lastSseEventAtMs ?? 'none'}`
+    );
+
+    if (
+      body.stream &&
+      readResult.transport === 'sse' &&
+      !readResult.streamDoneReceived &&
+      !readResult.finishReason
+    ) {
+      throw createCorrectionError(
+        'SUMMARY_STREAM_READ_FAILED',
+        'API özet akışı tamamlanma işareti olmadan kapandı.'
+      );
+    }
+    if (readResult.finishReason === 'content_filter') {
+      throw createCorrectionError(
+        'SUMMARY_CONTENT_BLOCKED',
+        'İçerik filtrelemesi nedeniyle özet yanıtı alınamadı.'
+      );
+    }
+    if (!aiResponseText.trim()) {
+      throw createCorrectionError(
+        readResult.reasoningContent.trim()
+          ? 'SUMMARY_FINAL_CONTENT_MISSING'
+          : 'SUMMARY_EMPTY_RESPONSE',
+        readResult.reasoningContent.trim()
+          ? 'Model yalnızca akıl yürütme içeriği döndürdü; final özet bulunamadı.'
+          : 'API özet yanıtı boş döndü.'
+      );
     }
 
     const parsedResult = ResponseParser.parseAndValidate(
@@ -333,14 +375,6 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
       latencyMs,
       timestamp: Date.now()
     };
-    
-    if (usage) {
-       finalResult.usage = {
-         inputTokens: usage.prompt_tokens || 0,
-         outputTokens: usage.completion_tokens || 0,
-         totalTokens: usage.total_tokens || 0
-       };
-    }
     
     if (request.transcript.warnings) {
         finalResult.warnings = finalResult.warnings || [];
@@ -361,12 +395,30 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
     });
     
   } catch (e: any) {
-    console.log(`[API Task] failed:`, e);
-    const isTimeout = e.message === 'Timeout';
-    const isAbort = e.name === 'AbortError' || e.message === 'AbortError';
-    
-    const errorCode = isAbort ? 'REQUEST_CANCELLED' : (isTimeout ? 'TIMEOUT' : (e.code || 'UNKNOWN_ERROR'));
-    const userMsg = isAbort ? 'İstek kullanıcı tarafından iptal edildi.' : (isTimeout ? 'İstek zaman aşımına uğradı. İşlem çok uzun sürdü.' : (e.message || 'Beklenmeyen bir hata oluştu.'));
+    const normalized = normalizeUnknownError(e);
+    const isTimeout =
+      taskContext.timedOut ||
+      e instanceof CorrectionResponseTimeoutError;
+    const isCancelled = taskContext.userCancelled === true;
+    const errorCode = isTimeout
+      ? 'REQUEST_TIMEOUT'
+      : isCancelled
+        ? 'REQUEST_CANCELLED'
+        : normalized.code || 'UNKNOWN_ERROR';
+    const userMsg = isTimeout
+      ? 'API özet isteği zaman aşımına uğradı.'
+      : isCancelled
+        ? 'İstek kullanıcı tarafından iptal edildi.'
+        : normalized.message || 'Beklenmeyen bir hata oluştu.';
+    const safeLog = {
+      taskId,
+      videoId,
+      code: errorCode,
+      timeoutKind: taskContext.timeoutKind || null,
+      elapsedMs: Math.round(performance.now() - startedAt),
+      diagnostics: normalized.diagnostics || null
+    };
+    console.error(`[ZYouTube Summary Error]\n${JSON.stringify(safeLog, null, 2)}`);
     
     chrome.runtime.sendMessage({
         type: 'API_SUMMARY_FAILED',
@@ -375,8 +427,11 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
         error: {
             code: errorCode,
             userMessage: userMsg,
-            retryable: !isAbort,
-            ...(e?.diagnostics ? { diagnostics: e.diagnostics } : {})
+            retryable: !isCancelled,
+            ...(normalized.diagnostics
+              ? { diagnostics: normalized.diagnostics }
+              : {}),
+            timeoutKind: taskContext.timeoutKind || null
         }
     }).catch(err => {
         console.error(`[API Task] delivery failed for task ${taskId}:`, err);
@@ -391,6 +446,138 @@ async function handleApiSummaryStart(taskId: string, videoId: string, request: a
     }
     resetIdleTimer();
   }
+}
+
+interface CorrectionChunkResult {
+  sentences: any[];
+  finishReason: string;
+  responseContentType: string;
+  metrics: CorrectionReadMetrics;
+}
+
+async function executeCorrectionChunk(options: {
+  url: string;
+  request: any;
+  config: any;
+  signal: AbortSignal;
+  chunkIndex: number;
+  chunkCount: number;
+  requestStartedAtMs: number;
+  onProgress: (metrics: CorrectionReadMetrics) => void;
+}): Promise<CorrectionChunkResult> {
+  const chunkConfig = {
+    ...options.config,
+    correctionMaxTokens: Math.min(
+      Number(options.config.correctionMaxTokens) || 16_384,
+      8_192
+    )
+  };
+  const body = CorrectionPromptBuilder.buildApiRequestBody(
+    options.request,
+    chunkConfig
+  );
+  const response = await fetch(options.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${options.config.apiKey}`,
+      ...options.config.customHeaders
+    },
+    body: JSON.stringify(body),
+    signal: options.signal
+  });
+  const responseContentType =
+    response.headers?.get?.('content-type') || 'unknown';
+
+  if (!response.ok) {
+    let rawText = '';
+    try {
+      rawText = await response.text();
+    } catch {
+      // The response body is intentionally not retained.
+    }
+    throw createCorrectionError(
+      response.status === 504
+        ? 'CORRECTION_HTTP_504'
+        : 'CORRECTION_HTTP_ERROR',
+      response.status === 504
+        ? 'API saÄŸlayÄ±cÄ±sÄ± dÃ¼zeltme isteÄŸini zamanÄ±nda tamamlayamadÄ± (504).'
+        : `DÃ¼zeltme API isteÄŸi baÅŸarÄ±sÄ±z oldu: ${response.status}`,
+      {
+        ...createHttpDiagnostics(response, rawText, responseContentType),
+        chunkIndex: options.chunkIndex,
+        chunkCount: options.chunkCount
+      }
+    );
+  }
+
+  const readResult = await readCorrectionResponse(response, {
+    expectedStreaming: Boolean(body.stream),
+    firstByteTimeoutMs:
+      options.config.correctionFirstByteTimeoutMs ?? 60_000,
+    streamIdleTimeoutMs:
+      options.config.correctionStreamIdleTimeoutMs ?? 45_000,
+    requestStartedAtMs: options.requestStartedAtMs,
+    onProgress: options.onProgress
+  });
+
+  if (
+    body.stream &&
+    readResult.transport === 'sse' &&
+    !readResult.streamDoneReceived &&
+    !readResult.finishReason
+  ) {
+    throw createCorrectionError(
+      'CORRECTION_STREAM_READ_FAILED',
+      'API yanÄ±t akÄ±ÅŸÄ± tamamlanma iÅŸareti olmadan kapandÄ±.',
+      {
+        ...readResult.metrics,
+        chunkIndex: options.chunkIndex,
+        chunkCount: options.chunkCount
+      }
+    );
+  }
+  if (readResult.finishReason === 'length') {
+    throw createCorrectionError(
+      'CORRECTION_CHUNK_LENGTH',
+      'DÃ¼zeltme cevabÄ± Ã§Ä±ktÄ± token sÄ±nÄ±rÄ±nda kesildi.',
+      {
+        chunkIndex: options.chunkIndex,
+        chunkCount: options.chunkCount
+      }
+    );
+  }
+  if (!readResult.content.trim()) {
+    throw createCorrectionError(
+      readResult.reasoningContent.trim()
+        ? 'CORRECTION_FINAL_CONTENT_MISSING'
+        : 'CORRECTION_EMPTY_RESPONSE',
+      readResult.reasoningContent.trim()
+        ? 'Model yalnÄ±zca akÄ±l yÃ¼rÃ¼tme iÃ§eriÄŸi dÃ¶ndÃ¼rdÃ¼; nihai JSON cevap bulunamadÄ±.'
+        : 'API yanÄ±tÄ± iÃ§erik barÄ±ndÄ±rmÄ±yor.',
+      {
+        chunkIndex: options.chunkIndex,
+        chunkCount: options.chunkCount
+      }
+    );
+  }
+
+  const parsed = CorrectionResponseParser.parse(
+    readResult.content,
+    readResult.finishReason
+  );
+  const sentences = CorrectionResponseParser.enrichCorrectedSentences(
+    parsed,
+    options.request.transcript.segments,
+    options.request.transcript.sourceLanguage
+  );
+
+  return {
+    sentences,
+    finishReason: readResult.finishReason,
+    responseContentType,
+    metrics: readResult.metrics
+  };
 }
 
 async function handleApiCorrectionStart(taskId: string, videoId: string, request: any, config: any) {
@@ -450,7 +637,9 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
     receivedCharacters: 0,
     lastSseEventAtMs: null,
     sseEventCount: 0,
-    contentChunkCount: 0
+    contentChunkCount: 0,
+    contentCharacters: 0,
+    reasoningCharacters: 0
   };
 
   try {
@@ -459,6 +648,140 @@ async function handleApiCorrectionStart(taskId: string, videoId: string, request
     let urlStr = config.baseUrl;
     while (urlStr.endsWith('/')) urlStr = urlStr.slice(0, -1);
     const url = urlStr.endsWith('/chat/completions') ? urlStr : `${urlStr}/chat/completions`;
+
+    const chunkRequests = splitCorrectionRequest(request);
+    if (chunkRequests.length > 1) {
+      const chunkProgress = new Array(chunkRequests.length).fill(0);
+      console.log(
+        `[API Task] correction split into ${chunkRequests.length} chunks`
+      );
+
+      let chunkResults: CorrectionChunkResult[];
+      try {
+        chunkResults = await mapWithConcurrency(
+          chunkRequests,
+          3,
+          async (chunkRequest, chunkIndex) => {
+            const chunkStartedAt = performance.now();
+            return executeCorrectionChunk({
+              url,
+              request: chunkRequest,
+              config,
+              signal: controller.signal,
+              chunkIndex,
+              chunkCount: chunkRequests.length,
+              requestStartedAtMs: chunkStartedAt,
+              onProgress: metrics => {
+                chunkProgress[chunkIndex] = metrics.contentCharacters;
+                const totalCharacters = chunkProgress.reduce(
+                  (sum, value) => sum + value,
+                  0
+                );
+                chrome.runtime.sendMessage({
+                  type: 'API_CORRECTION_PROGRESS',
+                  taskId,
+                  videoId,
+                  stage: 'streaming',
+                  message:
+                    `YanÄ±t alÄ±nÄ±yor... ${totalCharacters} karakter ` +
+                    `(${chunkIndex + 1}/${chunkRequests.length})`,
+                  elapsedMs: Math.round(performance.now() - startedAt)
+                }).catch(console.error);
+              }
+            });
+          }
+        );
+      } catch (error) {
+        if (!controller.signal.aborted) controller.abort(error);
+        throw error;
+      }
+
+      const completedAt = Date.now();
+      const combinedSentences = chunkResults
+        .flatMap(result => result.sentences)
+        .map((sentence, index) => ({
+          ...sentence,
+          id: `corrected-${index}-${completedAt}`,
+          index
+        }));
+      const aggregateMetrics = chunkResults.reduce(
+        (aggregate, result) => ({
+          contentType: 'multiple',
+          firstByteMs:
+            aggregate.firstByteMs === null
+              ? result.metrics.firstByteMs
+              : result.metrics.firstByteMs === null
+                ? aggregate.firstByteMs
+                : Math.min(
+                    aggregate.firstByteMs,
+                    result.metrics.firstByteMs
+                  ),
+          chunkCount:
+            aggregate.chunkCount + result.metrics.chunkCount,
+          receivedBytes:
+            aggregate.receivedBytes + result.metrics.receivedBytes,
+          receivedCharacters:
+            aggregate.receivedCharacters +
+            result.metrics.receivedCharacters,
+          lastSseEventAtMs: Math.max(
+            aggregate.lastSseEventAtMs || 0,
+            result.metrics.lastSseEventAtMs || 0
+          ) || null,
+          sseEventCount:
+            aggregate.sseEventCount + result.metrics.sseEventCount,
+          contentChunkCount:
+            aggregate.contentChunkCount +
+            result.metrics.contentChunkCount,
+          contentCharacters:
+            aggregate.contentCharacters +
+            result.metrics.contentCharacters,
+          reasoningCharacters:
+            aggregate.reasoningCharacters +
+            result.metrics.reasoningCharacters
+        }),
+        {
+          contentType: 'multiple',
+          firstByteMs: null,
+          chunkCount: 0,
+          receivedBytes: 0,
+          receivedCharacters: 0,
+          lastSseEventAtMs: null,
+          sseEventCount: 0,
+          contentChunkCount: 0,
+          contentCharacters: 0,
+          reasoningCharacters: 0
+        } as CorrectionReadMetrics
+      );
+
+      readMetrics = aggregateMetrics;
+      responseContentType = 'multiple';
+      sseEventCount = aggregateMetrics.sseEventCount;
+      contentChunkCount = aggregateMetrics.contentChunkCount;
+      finishReason = chunkResults
+        .map(result => result.finishReason)
+        .filter(Boolean)
+        .join(',');
+
+      console.log(
+        `[API Task] correction chunks completed: ` +
+        `chunks=${chunkRequests.length}, ` +
+        `characters=${aggregateMetrics.contentCharacters}, ` +
+        `elapsedMs=${Math.round(performance.now() - startedAt)}`
+      );
+      chrome.runtime.sendMessage({
+        type: 'API_CORRECTION_COMPLETED',
+        taskId,
+        videoId,
+        result: {
+          sentences: combinedSentences,
+          latencyMs: Math.round(performance.now() - startedAt),
+          timestamp: Date.now()
+        }
+      }).catch(error => {
+        console.error('[API Task] correction delivery failed:', error);
+      });
+      return;
+    }
 
     const body = CorrectionPromptBuilder.buildApiRequestBody(request, config);
 
@@ -542,7 +865,7 @@ model: ${body.model}`);
             videoId,
             stage: 'streaming',
             message:
-              `Yanıt alınıyor... ${metrics.receivedCharacters} karakter`,
+              `Yanıt alınıyor... ${metrics.contentCharacters} karakter`,
             elapsedMs: Math.round(performance.now() - startedAt)
           }).catch(console.error);
         }
@@ -587,6 +910,7 @@ model: ${body.model}`);
       `firstByteMs=${readMetrics.firstByteMs ?? 'none'}, ` +
       `chunks=${readMetrics.chunkCount}, bytes=${readMetrics.receivedBytes}, ` +
       `characters=${readMetrics.receivedCharacters}, ` +
+      `contentCharacters=${readMetrics.contentCharacters}, ` +
       `lastSseEventAtMs=${readMetrics.lastSseEventAtMs ?? 'none'}, ` +
       `sseEvents=${sseEventCount}, finishReason=${finishReason || 'none'}`
     );

@@ -5,11 +5,21 @@ export interface LiveCorrectionEnvironment {
   baseUrl: string;
   apiKey: string;
   model: string;
+  summaryMaxTokens: number;
+  summaryTokenParam: 'max_tokens' | 'max_completion_tokens';
+  summaryStreaming: boolean;
+  summaryStreamOptions: boolean;
+  summaryJsonMode: boolean;
   correctionMaxTokens: number;
   correctionTokenParam: 'max_tokens' | 'max_completion_tokens';
   correctionStreaming: boolean;
   correctionStreamOptions: boolean;
   correctionJsonMode: boolean;
+  liveUserDataDir?: string;
+}
+
+export interface LiveGeminiEnvironment {
+  gemUrl: string;
 }
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
@@ -58,16 +68,39 @@ export function loadPrivateLiveCorrectionEnvironment(
   }
 
   const correctionMaxTokens = Number(
-    values.ZYOUTUBE_CORRECTION_MAX_TOKENS || '130000'
+    values.ZYOUTUBE_CORRECTION_MAX_TOKENS || '16384'
   );
   if (!Number.isFinite(correctionMaxTokens) || correctionMaxTokens <= 0) {
     throw new Error('ZYOUTUBE_CORRECTION_MAX_TOKENS must be a positive number.');
+  }
+  const summaryMaxTokens = Number(
+    values.ZYOUTUBE_SUMMARY_MAX_TOKENS || '4000'
+  );
+  if (!Number.isFinite(summaryMaxTokens) || summaryMaxTokens <= 0) {
+    throw new Error('ZYOUTUBE_SUMMARY_MAX_TOKENS must be a positive number.');
   }
 
   return {
     baseUrl: values.ZYOUTUBE_API_BASE_URL,
     apiKey: values.ZYOUTUBE_API_KEY,
     model: values.ZYOUTUBE_API_MODEL,
+    summaryMaxTokens,
+    summaryTokenParam:
+      values.ZYOUTUBE_SUMMARY_TOKEN_PARAM === 'max_completion_tokens'
+        ? 'max_completion_tokens'
+        : 'max_tokens',
+    summaryStreaming: parseBoolean(
+      values.ZYOUTUBE_SUMMARY_STREAMING,
+      false
+    ),
+    summaryStreamOptions: parseBoolean(
+      values.ZYOUTUBE_SUMMARY_STREAM_OPTIONS,
+      false
+    ),
+    summaryJsonMode: parseBoolean(
+      values.ZYOUTUBE_SUMMARY_JSON_MODE,
+      true
+    ),
     correctionMaxTokens,
     correctionTokenParam:
       values.ZYOUTUBE_CORRECTION_TOKEN_PARAM === 'max_completion_tokens'
@@ -83,7 +116,34 @@ export function loadPrivateLiveCorrectionEnvironment(
     ),
     correctionJsonMode: parseBoolean(
       values.ZYOUTUBE_CORRECTION_JSON_MODE,
-      true
-    )
+      false
+    ),
+    ...(values.ZYOUTUBE_LIVE_USER_DATA_DIR
+      ? {
+          liveUserDataDir: path.resolve(
+            values.ZYOUTUBE_LIVE_USER_DATA_DIR
+          )
+        }
+      : {})
+  };
+}
+
+export function loadPrivateLiveGeminiEnvironment(
+  projectRoot: string
+): LiveGeminiEnvironment {
+  const envPath = path.resolve(projectRoot, '.env');
+  const values = parseEnvFile(fs.readFileSync(envPath, 'utf8'));
+  const required = [
+    'ZYOUTUBE_GEM_URL'
+  ] as const;
+  const missing = required.filter(name => !values[name]);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required private Gemini environment fields: ${missing.join(', ')}`
+    );
+  }
+
+  return {
+    gemUrl: values.ZYOUTUBE_GEM_URL
   };
 }
